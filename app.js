@@ -68,6 +68,7 @@ function renderInspector(){
  <div class="stat-row"><div class="stat"><b>${t.t}</b><small>T</small></div><div class="stat"><b>${t.save}+</b><small>Sv</small></div><div class="stat"><b>${t.move}</b><small>Move</small></div><div class="stat"><b>${t.oc}</b><small>OC/model</small></div></div>
  <div class="attack-line"><strong>Ranged</strong> · ${t.ranged.attacks}A × model · R${t.ranged.range} · S${t.ranged.s} · AP−${t.ranged.ap} · D${t.ranged.damage} · ${t.ranged.skill}+</div>
  <div class="attack-line"><strong>Melee</strong> · ${t.melee.attacks}A × model · S${t.melee.s} · AP−${t.melee.ap} · D${t.melee.damage} · ${t.melee.skill}+</div>
+ ${t.loadout?.length?`<details class="unit-audit"><summary>New Recruit default weapons (${t.loadout.length} types)</summary><ul>${t.loadout.slice(0,30).map(w=>`<li>${w.count}× ${html(w.name)} · ${html(w.mode)} · A${w.attacks} / S${w.s} / AP−${w.ap} / D${w.damage}</li>`).join('')}</ul></details>`:''}
  <p class="profile-note">${tierTag(t)} ${html(t.description)}</p><p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
 }
 function renderObjectives(){

@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v1';
-const CACHE_VERSION=1;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v2';
+const CACHE_VERSION=2;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.4';
+const RULESET_VERSION='alpha-0.5';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -58,6 +58,53 @@ function minModels(el){
  const n=c?int(value(c,'value')):NaN;
  return Number.isFinite(n)?Math.max(0,n):0;
 }
+// New Recruit encodes squad sizes as mutually exclusive *upgrade* entries under
+// "Required unit size and formation", not as type=model entries. The default
+// branch determines both its minimum models and its mandatory starting points.
+function formation(unit){
+ const group=path(unit,'selectionEntryGroups','selectionEntryGroup').find(g=>/required unit size and formation/i.test(value(g,'name')));
+ if(!group)return null;
+ const entries=path(group,'selectionEntries','selectionEntry').filter(e=>value(e,'hidden')!=='true');
+ if(!entries.length)return null;
+ const choices=entries.map(e=>{
+  const label=value(e,'name'); const m=label.match(/(?:^|\b)(\d{1,2})\s+models?\b/i);
+  return {id:value(e,'id'),label,models:m?Number(m[1]):null,points:pointsFrom(e),element:e};
+ });
+ const selected=choices.find(e=>e.id===value(group,'defaultSelectionEntryId'))||choices[0];
+ return {group,choices,selected};
+}
+function sourceWeapons(doc,unit,form,profileIndex){
+ const profiles=profileIndex||new Map(descendants(doc.documentElement,'profile').filter(p=>value(p,'id')&&value(p,'typeName')==='Weapon').map(p=>[value(p,'id'),p]));
+ const weapons=[],slots=[],maxDepth=45;
+ function walk(current,multiplier,depth){
+  if(depth>maxDepth)return;
+  const label=value(current,'name');
+  const countMatch=label.match(/^(\d{1,2})\s+(?:(?:regular|standard|remaining)\s+)?(?:[A-Za-z][^—:]*?)(?:\s+[—:]|\s*—)/);
+  const count=countMatch&&countMatch[1]&&/regular|standard|thrall|reaver|warrior|marine|troop|servitor|scout/i.test(label)?Math.min(20,Number(countMatch[1])):1;
+  const copies=multiplier*count;
+  for(const link of path(current,'infoLinks','infoLink')){
+   if(value(link,'type')!=='profile')continue;
+   const profile=profiles.get(value(link,'targetId'));
+   if(!profile)continue;
+   const mode=/melee|close combat/i.test(field(profile,'Range'))?'melee':'ranged';
+   const result=parseWeapon(profile,mode);
+   if(result)weapons.push({...result,mode,name:value(profile,'name'),count:copies,traits:field(profile,'Traits'),sourceProfileId:value(profile,'id'),attackValue:field(profile,'A'),damageValue:field(profile,'D')});
+  }
+  for(const group of path(current,'selectionEntryGroups','selectionEntryGroup')){
+   const options=path(group,'selectionEntries','selectionEntry').filter(e=>value(e,'hidden')!=='true');
+   if(!options.length)continue;
+   const chosen=options.find(e=>value(e,'id')===value(group,'defaultSelectionEntryId'))||options[0];
+   // Record menus, including alternative weapons. These are displayed as
+   // selectable in New Recruit but not yet selectable in this simulator.
+   if(options.length>1&&slots.length<150)slots.push({name:value(group,'name'),selected:value(chosen,'name'),choices:options.map(e=>value(e,'name')).slice(0,45)});
+   walk(chosen,copies,depth+1);
+  }
+ }
+ walk(form?.selected?.element||unit,1,0);
+ const merged=new Map();
+ for(const w of weapons){const key=w.mode+'|'+w.sourceProfileId;const prior=merged.get(key);if(prior)prior.count+=w.count;else merged.set(key,{...w});}
+ return {weapons:[...merged.values()].slice(0,80),slots};
+}
 function isArmouredVehicle(name,category){return /vehicle|tank|dreadnought|daemon engine|artillery|transport|aircraft|land raider|rhino|predator|vindicat|defiler|crawler|gunship|drop pod|siege engine|automata/i.test(name+' '+category);}
 function collectUnitRoots(doc){
  const root=doc.documentElement,found=[],seen=new Set();
@@ -79,6 +126,8 @@ function rootProfile(unit){
  return profiles[0]||null;
 }
 function countFor(unit,name,cat){
+ const formed=formation(unit)?.selected?.models;
+ if(Number.isInteger(formed)&&formed>=1&&formed<=20)return formed;
  const troop=descendants(unit,'selectionEntry').filter(n=>value(n,'type')==='model');
  const count=troop.reduce((n,x)=>n+minModels(x),0);
  if(count>0)return Math.min(count,20);
@@ -98,6 +147,9 @@ function getStats(unit,name,category){
  return {move,t,save,wp,oc};
 }
 function getPoints(unit,modelCount,stats){
+ const form=formation(unit);
+ const selected=form?.selected;
+ if(selected&&Number.isFinite(selected.points)&&selected.points>0)return {points:bounded(Math.round(Math.max(0,pointsFrom(unit)||0)+selected.points),1,3000,120),estimated:false,basis:'formation'};
  const explicit=pointsFrom(unit);
  if(Number.isFinite(explicit)&&explicit>0)return {points:bounded(Math.round(explicit),1,3000,120),estimated:false,basis:'direct'};
  // Some catalogue entries charge by model, not at the parent unit entry.
@@ -125,7 +177,7 @@ function categoryFor(unit){const links=path(unit,'categoryLinks','categoryLink')
 function fingerprint(unit){
  const snapshot={id:unit.id,sourceId:unit.sourceId,faction:unit.faction,name:unit.name,points:unit.points,
   estimated:unit.estimated,models:unit.models,wp:unit.wp,t:unit.t,save:unit.save,move:unit.move,oc:unit.oc,
-  ranged:unit.ranged,melee:unit.melee,special:unit.special,category:unit.category,audit:unit.audit};
+  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,special:unit.special,category:unit.category,audit:unit.audit};
  return hash(JSON.stringify(snapshot));
 }
 function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
@@ -140,12 +192,14 @@ function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LE
 function reviewNotes(unit){
  if(!unit||unit.source!=='linked')return ['Built-in, simulator-only playtest profile; not imported from New Recruit.'];
  const a=unit.audit||{};
- const points=a.points==='direct'?'Points read from the unit entry.':a.points==='per-model'?'Points extrapolated from a model entry; roster modifiers may change them.':'Points are a simulator estimate, not a published roster cost.';
+ const points=a.points==='formation'?'Starting points taken from the default required unit-size option (other sizes and extras may change the total).':a.points==='direct'?'Points read from the unit entry.':a.points==='per-model'?'Points extrapolated from a model entry; roster modifiers may change them.':'Points are a simulator estimate, not a published roster cost.';
  return [points,
   a.unitStats==='source'?'Unit characteristics read from the linked profile; movement is converted to grid squares.':'Some characteristics use simulator defaults.',
-  a.modelCount==='declared'?'Starting model count inferred from explicit minimum selections.':'Starting model count is a simulator approximation.',
+  a.modelCount==='declared'?'Default unit-size option selected directly from the catalogue.':'Starting model count is a simulator approximation.',
   a.ranged==='source'?'A ranged weapon profile was found; one representative profile is used.':'Ranged attacks use a simulator fallback.',
   a.melee==='source'?'A melee weapon profile was found; one representative profile is used.':'Melee attacks use a simulator fallback.',
+  unit.loadout?.length?`Default equipment: ${unit.loadout.slice(0,24).map(w=>`${w.count}× ${w.name} (${w.mode})`).join('; ')}${unit.loadout.length>24?'; additional profiles omitted':''}. Alternative equipment is not yet selectable.`:'Weapon links in the default equipment could not be fully resolved.',
+  unit.sizeOptions?.length?`Published size options: ${unit.sizeOptions.map(x=>`${x.label}${Number.isFinite(x.points)?' ('+x.points+' pts)':''}`).slice(0,14).join('; ')}. The simulator currently uses only the default size.`:'No explicit size options were identified.',
   statusFor(unit)==='verified'?'Full combat mapping reviewed and pinned to this catalogue revision.':'Wargear alternatives, restrictions and special rules have NOT been fully verified for the combat engine.'
  ];
 }
@@ -155,20 +209,26 @@ function parseCatalogue(xml,faction,sourceVersion=''){
  const doc=new DOMParser().parseFromString(xml,'application/xml');
  if(descendants(doc,'parsererror').length||doc.documentElement?.localName!=='catalogue')throw Error('New Recruit catalogue XML was invalid.');
  const nodes=collectUnitRoots(doc),revision=value(doc.documentElement,'revision');
+ const profileIndex=new Map(descendants(doc.documentElement,'profile').filter(p=>value(p,'id')&&value(p,'typeName')==='Weapon').map(p=>[value(p,'id'),p]));
  const result=[];
  for(const node of nodes){
   const name=value(node,'name').trim();if(!name)continue;
+  const form=formation(node);
+  const linked=sourceWeapons(doc,node,form,profileIndex);
   const cat=categoryFor(node),stats=getStats(node,name,cat),models=countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
   const vehicle=isArmouredVehicle(name,cat),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
   const special=faction==='IW'&&!vehicle&&!mortal?{fnp:5,regen:1}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
   const profile=rootProfile(node);
   const fieldCoverage=['M','T','Sv','W','OC'].every(key=>!!field(profile,key));
-  const declaredModels=descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
+  const declaredModels=!!form?.selected?.models||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
   const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
-   ranged:weapons.ranged,melee:weapons.melee,special,source:'linked',revision,estimated:p.estimated,category:cat,
-   audit:{points:p.basis,unitStats:fieldCoverage?'source':'fallback',modelCount:declaredModels?'declared':'inferred',ranged:weapons.rangedFromSource?'source':'fallback',melee:weapons.meleeFromSource?'source':'fallback'},
-   description:`New Recruit ${cat||'datasheet'} · simplified battle rules${p.estimated?' · simulator point estimate':''}.`};
+   ranged:(()=>{const found=linked.weapons.filter(w=>w.mode==='ranged');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.ranged;})(),
+   melee:(()=>{const found=linked.weapons.filter(w=>w.mode==='melee');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.melee;})(),
+   loadout:linked.weapons,sizeOptions:form?.choices.map(({id,label,models,points})=>({id,label,models,points}))||[],
+   equipmentMenus:linked.slots,special,source:'linked',revision,estimated:p.estimated,category:cat,
+   audit:{points:p.basis,unitStats:fieldCoverage?'source':'fallback',modelCount:declaredModels?'declared':'inferred',ranged:linked.weapons.some(w=>w.mode==='ranged')?'source':weapons.rangedFromSource?'source':'fallback',melee:linked.weapons.some(w=>w.mode==='melee')?'source':weapons.meleeFromSource?'source':'fallback'},
+   description:`New Recruit ${cat||'datasheet'} · default squad size and wargear (playtest combat)${p.estimated?' · simulator point estimate':''}.`};
   unit.verification=statusFor(unit,sourceVersion);
   result.push(unit);
  }
@@ -234,5 +294,5 @@ async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=
  const counts=Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]));
  return {ok:failed===0,changed,failed,counts,versionSource,cached:!!cached};
 }
-return {REPOSITORY,FILES,CACHE_KEY,RULESET_VERSION,VERIFIED_LEDGER,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
+return {REPOSITORY,FILES,CACHE_KEY,RULESET_VERSION,VERIFIED_LEDGER,formation,sourceWeapons,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
 });

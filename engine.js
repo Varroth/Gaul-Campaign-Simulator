@@ -137,35 +137,51 @@ function move(g,uid,x,y){if(!canMove(g,uid,x,y))return {ok:false,message:'Illega
  const u=g.units.find(u=>u.uid===uid);u.x=x;u.y=y;u.moved=true;writeLog(g,`${template(u).name} moved to ${x+1},${y+1}.`);return {ok:true};}
 function woundTarget(s,t){if(s>=t*2)return 2;if(s>t)return 3;if(s===t)return 4;if(s*2<=t)return 6;return 5;}
 function nullifierNear(g,defender){return living(g,defender.side).some(u=>template(u).special.nullifier&&distance(u,defender)<=2);}
+// Linked New Recruit defaults can include mixed weapons (e.g. four bolters
+// and a plasma pistol). Resolve those profiles separately instead of giving
+// every model the strongest representative gun. Equipment choices and special
+// weapon traits are still playtest approximations until fully mapped.
+function attackProfiles(t,mode,remainingModels){
+ if(t.source==='linked'&&Array.isArray(t.loadout)&&t.loadout.length){
+  const found=t.loadout.filter(w=>w.mode===mode&&Number.isFinite(w.attacks)&&w.attacks>0&&w.count>0);
+  return found.map(w=>({...w,activeCount:Math.min(remainingModels,Math.max(0,Math.round(w.count*remainingModels/t.models)))}));
+ }
+ const w=t[mode];return w?.attacks>0?[{...w,name:mode,count:t.models,activeCount:remainingModels}]:[];
+}
 function attack(g,attackerId,targetId,mode){
  const a=living(g).find(u=>u.uid===attackerId),b=living(g).find(u=>u.uid===targetId);
  if(!a||!b||a.side===b.side||a.side!==g.active)return {ok:false,message:'Select a living allied attacker and an enemy target.'};
  if(g.phase!==(mode==='ranged'?'shooting':'fight'))return {ok:false,message:'Wrong combat phase.'};
  if(mode==='ranged'&&a.shot||mode==='melee'&&a.fought)return {ok:false,message:'That unit has already attacked this phase.'};
- const at=template(a), bt=template(b), weapon=at[mode];
- const dist=distance(a,b);
- if(dist>weapon.range)return {ok:false,message:`Target out of ${mode==='ranged'?'weapon':'melee'} range.`};
+ const at=template(a),bt=template(b),dist=distance(a,b);
+ const weapons=attackProfiles(at,mode,a.models).filter(w=>w.range>=dist&&w.activeCount>0);
+ if(!weapons.length)return {ok:false,message:`No equipped ${mode==='ranged'?'ranged':'melee'} weapon can attack at this range.`};
  if(mode==='ranged'&&dist<=1)return {ok:false,message:'Units in engagement range cannot shoot in this simplified ruleset.'};
  if(mode==='ranged')a.shot=true;else a.fought=true;
- const attacks=Math.min(80,a.models*weapon.attacks), hitRoll=clamp(weapon.skill+((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0),2,6);
- let hits=0,wounds=0,unsaved=0,casualties=0,effective=0;
- for(let i=0;i<attacks&&b.models>0;i++){
-  if(d6(g)<hitRoll)continue;hits++;
-  if(d6(g)<woundTarget(weapon.s,bt.t))continue;wounds++;
-  const coverBonus=mode==='ranged'&&COVER.has(key(b.x,b.y))?1:0;
-  const save=clamp(bt.save+weapon.ap-coverBonus,2,7);
-  if(save<=6 && d6(g)>=save)continue;
-  unsaved++;
-  // Damage does not spill across models. A FNP roll is taken per damage point.
-  const remaining=bt.wp-b.injury,rawDamage=Math.min(weapon.damage,remaining);
-  let damage=0;
-  for(let p=0;p<rawDamage;p++)if(!(bt.special.fnp && d6(g)>=bt.special.fnp))damage++;
-  b.injury+=damage;effective+=damage;
-  if(b.injury>=bt.wp){b.models--;b.injury=0;casualties++;}
+ let hits=0,wounds=0,unsaved=0,casualties=0,effective=0,attacks=0;
+ for(const weapon of weapons){
+  const attempts=Math.min(80-attacks,weapon.activeCount*weapon.attacks);
+  if(attempts<=0)break;attacks+=attempts;
+  const hitRoll=clamp(weapon.skill+((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0),2,6);
+  for(let i=0;i<attempts&&b.models>0;i++){
+   if(d6(g)<hitRoll)continue;hits++;
+   if(d6(g)<woundTarget(weapon.s,bt.t))continue;wounds++;
+   const coverBonus=mode==='ranged'&&COVER.has(key(b.x,b.y))?1:0;
+   const save=clamp(bt.save+weapon.ap-coverBonus,2,7);
+   if(save<=6&&d6(g)>=save)continue;
+   unsaved++;
+   // Damage does not spill across models. FNP is rolled per point of damage.
+   const remaining=bt.wp-b.injury,rawDamage=Math.min(weapon.damage,remaining);
+   let damage=0;
+   for(let p=0;p<rawDamage;p++)if(!(bt.special.fnp&&d6(g)>=bt.special.fnp))damage++;
+   b.injury+=damage;effective+=damage;
+   if(b.injury>=bt.wp){b.models--;b.injury=0;casualties++;}
+  }
  }
  writeLog(g,`${at.name} ${mode==='ranged'?'fired on':'struck'} ${bt.name}: ${hits}/${attacks} hits, ${wounds} wounds, ${effective} damage, ${casualties} models removed${b.models===0?' — DESTROYED':''}.`);
  return {ok:true,attacks,hits,wounds,unsaved,damage:effective,casualties,eliminated:b.models===0};
 }
+
 function canCharge(g,aid,bid){
  const a=living(g).find(u=>u.uid===aid),b=living(g).find(u=>u.uid===bid);
  if(!a||!b||a.side!==g.active||a.side===b.side||g.phase!=='charge'||a.charged)return false;
@@ -286,5 +302,5 @@ function validateLoadedState(g){
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,FACTIONS,TEMPLATES,BY_ID,registerLinked,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,attackProfiles,FACTIONS,TEMPLATES,BY_ID,registerLinked,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

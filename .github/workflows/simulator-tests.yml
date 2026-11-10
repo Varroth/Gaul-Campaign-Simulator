@@ -35,3 +35,5 @@ jobs:
           persist-credentials: false
       - name: Audit source catalogue XML structure
         run: python scripts/audit_upstream.py upstream
+      - name: Audit Infernal Warriors default formations and weapons
+        run: python scripts/audit_infernal.py upstream/Infernal_Warriors.cat

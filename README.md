@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.4 (Verified / Synced / Sim Estimate)
+# Gaul Campaign Simulator — Alpha 0.5 (Infernal Warriors source-profile audit)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -11,7 +11,7 @@ No user login or GitHub token is needed. The browser fetches public catalogue `.
 ## Confidence labels
 
 - **Verified:** Source entry and the simulator combat mapping have been manually reviewed, with all required checks, a source Git blob SHA and a profile fingerprint pinned in the verification ledger. Automatically becomes **Synced** if the source revision changes. This initial release intentionally awards no Verified badges until complete reviews are performed.
-- **Synced:** A unit imported from the New Recruit repository. Its name and some fields come from the XML, while model counts, weapon selection, points and abilities can still be approximations.
+- **Synced:** A unit imported from the New Recruit repository. Its name and some fields come from the XML, while advanced weapon traits, optional loadouts, roster modifiers and abilities may still use simplified rules.
 - **Sim Estimate:** A manually maintained simulator-only profile, not a linked New Recruit unit.
 - **Est. points:** The imported XML did not contain an interpretable base cost, so the simulator generated one. **Calc. points:** A cost was extrapolated from model entries; roster modifiers may change it. Both warnings are independent of verification level.
 
@@ -25,7 +25,7 @@ Use the **Profile status** filter and expand **Verification details** on each un
 
 ## What is *not* fully imported yet
 
-This is a tactical simulation, **not** a faithful renderer of every New Recruit selection graph or Warhammer tabletop rule. Complex unit composition, weapon menus, model-specific profiles, point modifiers, detachment rules, stratagems, leader attachments and detailed faction mechanics are not automatically translated. If a base cost cannot be read safely, the UI marks it as **SIM ESTIMATE**. Ranged/melee weapons shown in the inspector are representative and may use simplified placeholders. Do **not** use these profiles or Battle Lab results as validated army-list prices or competitive balance claims.
+This is a tactical simulation, **not** a faithful renderer of every New Recruit selection graph or Warhammer tabletop rule. The importer now reads the catalogue’s **default required formation** (squad size and listed base points), resolves linked default weapon profiles and uses mixed-weapon attack counts. Other formation choices and equipment menus are shown for review, but are not yet freely selectable within a single simulated roster. Complex model-specific wound allocation, weapon traits, paid modifiers, detachments, stratagems, Leader attachments and faction mechanics remain simplified. If a source cost cannot be resolved, it is flagged **Est. points**; this is not the same as the Sim Estimate profile status. Do **not** use these profiles or Battle Lab results as validated army-list prices or competitive balance claims.
 
 **Silver Tempests:** The source `Silver_Tempest.cat` currently has *zero* published root units. Its eight existing simulator playtest units remain selectable until that catalogue is populated.
 
@@ -37,13 +37,14 @@ Open `index.html` in a modern browser. Internet access is needed for the source 
 
 `node --test tests/*.test.cjs`
 
-GitHub Actions also downloads the public New Recruit source repository **read-only** and audits the XML root unit layout against its published manifest. There are no third-party JavaScript libraries or browser tracking services.
+GitHub Actions also downloads the public New Recruit source repository **read-only**, audits the XML root unit layout and checks five known Infernal Warriors formation configurations. Local real-browser parser tests are available in `tests/browser-parser-smoke.py` (requires Playwright). There are no third-party JavaScript libraries or browser tracking services.
 
 ## Roadmap
 
 - [x] Live catalogue discovery and cache keyed to the source repository's file checksums.
 - [x] Searchable Army Builder and on-demand refresh.
-- [ ] Detailed profile/wargear/points translation with correct New Recruit modifier rules.
+- [x] Infernal Warriors default formation sizes, published starting points and linked default weapon profiles (initial audit).
+- [ ] Exact loadout alternatives, model-by-model wound allocation, weapon traits and modifier-based points for all units.
 - [ ] Formal Leader attachments and cross-faction allied force rules.
 - [ ] Terrain, line of sight, psychic mastery, engine containment and full faction abilities.
 - [ ] Multiplayer and narrative campaign persistence.
