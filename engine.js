@@ -92,6 +92,19 @@ function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 function random(game){let a=(game.seedState+=0x6D2B79F5)>>>0; a=Math.imul(a^(a>>>15),a|1);a^=a+Math.imul(a^(a>>>7),a|61);return ((a^(a>>>14))>>>0)/4294967296;}
 function d6(game){return 1+Math.floor(random(game)*6);}
 function d(game,n){return 1+Math.floor(random(game)*n);}
+// Source A and D values may be D3, D6, 2D6 or D6+N. Roll per firing model
+// and per unsaved hit; retain a fallback only for unknown source expressions.
+function rollProfileValue(game,value,fallback,cap=80){
+ const expr=String(value??'').replace(/\s+/g,'').toUpperCase();
+ if(/^\d+$/.test(expr))return Math.min(cap,Math.max(0,Number(expr)));
+ const match=expr.match(/^(\d*)D(3|6)(?:\+(\d+))?$/);
+ if(!match)return Math.min(cap,Math.max(0,Number(fallback)||0));
+ const dice=Math.min(20,Math.max(1,Number(match[1]||'1')));
+ let total=Math.min(cap,Number(match[3]||0));
+ for(let i=0;i<dice;i++)total=Math.min(cap,total+d(game,Number(match[2])));
+ return total;
+}
+
 function key(x,y){return `${x},${y}`;}
 function validCell(x,y){return Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<WIDTH&&y<HEIGHT&&!WALLS.has(key(x,y));}
 function distance(a,b){return Math.abs(a.x-b.x)+Math.abs(a.y-b.y);}
@@ -400,7 +413,8 @@ function attack(g,attackerId,targetId,mode){
  for(const weapon of weapons){
   const tr=weaponTraits(weapon);
   const bonus=mode==='ranged'&&dist<=weapon.range/2;
-  const base=weapon.activeCount*weapon.attacks;
+  let base=0;
+  for(let m=0;m<weapon.activeCount;m++)base=Math.min(80,base+rollProfileValue(g,weapon.attackValue,weapon.attacks));
   const blast=mode==='ranged'&&tr.blast?Math.floor(b.models/5)*weapon.activeCount:0;
   const attempts=Math.min(80-attacks,base+(bonus?tr.rapidFire*weapon.activeCount:0)+blast);
   if(attempts<=0)break;attacks+=attempts;
@@ -453,7 +467,7 @@ function attack(g,attackerId,targetId,mode){
     const special=targetLeader?bt.leader.special||{}:bt.special;
     // FNP is rolled for *every* point of unsaved damage, not just those
     // needed to kill the current model. Excess damage does not spill over.
-    let rawDamage=weapon.damage+(mode==='ranged'&&bonus?tr.melta:0);
+    let rawDamage=rollProfileValue(g,weapon.damageValue,weapon.damage,30)+(mode==='ranged'&&bonus?tr.melta:0);
     if(hasAbility(bt,'Armoured Flight'))rawDamage=Math.max(1,rawDamage-1);
     if(rawDamage===2&&hasAbility(bt,'Relic Plate')&&once(g,b,'damage:Relic Plate','battle'))rawDamage=1;
     let damage=0;
@@ -651,5 +665,5 @@ function validateLoadedState(g){
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

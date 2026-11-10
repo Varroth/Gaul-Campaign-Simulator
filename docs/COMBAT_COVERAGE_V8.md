@@ -31,3 +31,8 @@ The following require additional game-engine subsystems, not merely more UI sele
 ## Incremental individual-unit verification pass
 
 The engine now blocks ranged attacks through impassable wall tiles, including shots that only touch a wall corner. The AI and highlighted human targets apply the same obstruction check. This is **not** full line of sight: models, terrain height, aircraft and visibility rules are still approximations. No new Verified badges were awarded by this upgrade.
+
+
+## Variable A/D weapon dice
+
+New Recruit weapon expressions D3, D6, 2D6 and D6+N now roll separately per equipped model (attacks) and per unsaved wound (damage). Seeded replays stay deterministic; unsupported expressions still require review. Source-profile and rules sign-offs are still outstanding.
