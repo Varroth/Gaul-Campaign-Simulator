@@ -34,3 +34,14 @@
 .muster-row .live-source-tag{margin-left:4px}
 @media(max-width:1100px){.builder-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.builder-controls{grid-template-columns:1fr}.builder-controls label:last-child{grid-column:auto}}
+/* Alpha 0.6 — configured Infernal Warriors formations */
+.muster-config-wrap{border-bottom:1px solid #2c353c;padding-bottom:3px}
+.muster-config-wrap>.muster-row{border-bottom:0}
+.muster-actions{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.muster-row .muster-actions .edit-unit-btn{color:#d9c59f;font-size:11px;border:1px solid #72664d;border-radius:5px;padding:6px 8px;background:#2c2a26}
+.muster-row .muster-actions .edit-unit-btn:hover{background:#493b2a}
+.muster-editor{background:#111b23;border:1px solid #53616a;border-radius:8px;padding:13px;margin:3px 0 12px;display:grid;gap:10px}
+.muster-editor label{font-size:12px;color:#d4dde1}
+.muster-editor select{margin-top:5px;max-width:100%;text-overflow:ellipsis}
+.gear-editor{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:9px;max-height:430px;overflow:auto;padding:2px}
+.muster-editor .muted{margin:0}

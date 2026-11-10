@@ -71,6 +71,18 @@ function registerLinked(faction,units){
  }
  return count;
 }
+// Roster-specific variants are registered as hidden templates. Save files refer
+// to their deterministic IDs and include only selections, never arbitrary stats.
+function registerConfiguration(configured){
+ if(!configured||!configured.id?.startsWith('cfg-')||!configured.baseId||!BY_ID[configured.baseId]||
+  configured.faction!==BY_ID[configured.baseId].faction||!Number.isInteger(configured.models)||
+  configured.models<1||configured.models>21||!Number.isInteger(configured.points)||configured.points<1||configured.points>3000)
+  throw Error('Invalid custom formation.');
+ const old=BY_ID[configured.id];
+ if(old)Object.assign(old,configured);
+ else{TEMPLATES.push(configured);BY_ID[configured.id]=configured;}
+ return configured.id;
+}
 const DEFAULT_PLAYER=['iw-varroth','iw-ashen','iw-berserkers','fc-iron','fc-servitors'];
 const DEFAULT_ENEMY=['ad-vephar','ad-triarch','ad-breach','ad-shadow','st-stormseer','st-vanguard'];
 const OBJECTIVES=[{x:3,y:2,id:'A'},{x:6,y:4,id:'B'},{x:8,y:5,id:'C'}];
@@ -107,7 +119,11 @@ function createGame(options={}){
 }
 function template(u){return BY_ID[u.template];}
 function living(game,side){return game.units.filter(u=>u.models>0&&(!side||u.side===side));}
-function status(u){const t=template(u);return {models:u.models,hp:u.models*t.wp-u.injury,maxHp:t.models*t.wp,points:t.points};}
+function status(u){const t=template(u);
+ const maxHp=t.leader&&t.bodyguardModels?t.bodyguardModels*t.wp+t.leader.wp:t.models*t.wp;
+ const hp=t.leader?Math.max(0,(u.models>1?(u.models-1)*t.wp+t.leader.wp:t.leader.wp)-u.injury):u.models*t.wp-u.injury;
+ return {models:u.models,hp,maxHp,points:t.points};
+}
 function writeLog(g,text){g.log.unshift(`R${g.round} · ${text}`);if(g.log.length>250)g.log.length=250;}
 function startTurn(g,side){
  g.active=side;g.phase='movement';
@@ -144,7 +160,9 @@ function nullifierNear(g,defender){return living(g,defender.side).some(u=>templa
 function attackProfiles(t,mode,remainingModels){
  if(t.source==='linked'&&Array.isArray(t.loadout)&&t.loadout.length){
   const found=t.loadout.filter(w=>w.mode===mode&&Number.isFinite(w.attacks)&&w.attacks>0&&w.count>0);
-  return found.map(w=>({...w,activeCount:Math.min(remainingModels,Math.max(0,Math.round(w.count*remainingModels/t.models)))}));
+  return found.map(w=>({...w,activeCount:t.leader&&t.bodyguardModels
+   ?(w.isLeader?(remainingModels>0?1:0):Math.min(Math.max(0,remainingModels-1),Math.max(0,Math.round(w.count*Math.max(0,remainingModels-1)/t.bodyguardModels))))
+   :Math.min(remainingModels,Math.max(0,Math.round(w.count*remainingModels/t.models)))}));
  }
  const w=t[mode];return w?.attacks>0?[{...w,name:mode,count:t.models,activeCount:remainingModels}]:[];
 }
@@ -165,17 +183,21 @@ function attack(g,attackerId,targetId,mode){
   const hitRoll=clamp(weapon.skill+((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0),2,6);
   for(let i=0;i<attempts&&b.models>0;i++){
    if(d6(g)<hitRoll)continue;hits++;
-   if(d6(g)<woundTarget(weapon.s,bt.t))continue;wounds++;
+   const defenderProfile=bt.leader&&b.models===1?bt.leader:bt;
+   if(d6(g)<woundTarget(weapon.s,defenderProfile.t))continue;wounds++;
    const coverBonus=mode==='ranged'&&COVER.has(key(b.x,b.y))?1:0;
-   const save=clamp(bt.save+weapon.ap-coverBonus,2,7);
+   const save=clamp(defenderProfile.save+weapon.ap-coverBonus,2,7);
    if(save<=6&&d6(g)>=save)continue;
    unsaved++;
    // Damage does not spill across models. FNP is rolled per point of damage.
-   const remaining=bt.wp-b.injury,rawDamage=Math.min(weapon.damage,remaining);
+   const lastLeader=bt.leader&&b.models===1;
+   const wp=lastLeader?bt.leader.wp:bt.wp;
+   const special=lastLeader?bt.leader.special||{}:bt.special;
+   const remaining=wp-b.injury,rawDamage=Math.min(weapon.damage,remaining);
    let damage=0;
-   for(let p=0;p<rawDamage;p++)if(!(bt.special.fnp&&d6(g)>=bt.special.fnp))damage++;
+   for(let p=0;p<rawDamage;p++)if(!(special.fnp&&d6(g)>=special.fnp))damage++;
    b.injury+=damage;effective+=damage;
-   if(b.injury>=bt.wp){b.models--;b.injury=0;casualties++;}
+   if(b.injury>=wp){b.models--;b.injury=0;casualties++;}
   }
  }
  writeLog(g,`${at.name} ${mode==='ranged'?'fired on':'struck'} ${bt.name}: ${hits}/${attacks} hits, ${wounds} wounds, ${effective} damage, ${casualties} models removed${b.models===0?' — DESTROYED':''}.`);
@@ -197,7 +219,9 @@ function charge(g,aid,bid){
 }
 function objectiveOwner(g,o){
  const tally={player:0,enemy:0};
- for(const u of living(g))if(distance(u,o)<=1)tally[u.side]+=u.models*template(u).oc;
+ for(const u of living(g))if(distance(u,o)<=1){const t=template(u);
+  tally[u.side]+=t.leader?Math.max(0,u.models-1)*t.oc+t.leader.oc:u.models*t.oc;
+ }
  if(tally.player===tally.enemy)return null;return tally.player>tally.enemy?'player':'enemy';
 }
 function scoreTurn(g,side){
@@ -296,11 +320,11 @@ function battleLab(player,enemy,count=10,seed=1111){
 function validateLoadedState(g){
  if(!g||g.version!==2||!Array.isArray(g.units)||g.units.length>28||!g.units.length||!g.score||!Array.isArray(g.log)||!Array.isArray(g.objectives)||g.objectives.length!==3)throw Error('Incompatible save file.');
  if(g.objectives.some(o=>!['A','B','C'].includes(o.id)||!validCell(o.x,o.y)))throw Error('Save file contains invalid objectives.');
- if(g.units.some(u=>!BY_ID[u.template]||!['player','enemy'].includes(u.side)||!validCell(u.x,u.y)||!Number.isInteger(u.models)||u.models<0||u.models>BY_ID[u.template].models||!Number.isInteger(u.injury)||u.injury<0||u.injury>=BY_ID[u.template].wp))throw Error('Save file contains invalid unit data.');
+ if(g.units.some(u=>!BY_ID[u.template]||!['player','enemy'].includes(u.side)||!validCell(u.x,u.y)||!Number.isInteger(u.models)||u.models<0||u.models>BY_ID[u.template].models||!Number.isInteger(u.injury)||u.injury<0||u.injury>=(BY_ID[u.template].leader&&u.models===1?BY_ID[u.template].leader.wp:BY_ID[u.template].wp)))throw Error('Save file contains invalid unit data.');
  if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
  if(g.units.filter(u=>u.models>0).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,attackProfiles,FACTIONS,TEMPLATES,BY_ID,registerLinked,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,attackProfiles,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.5.2 (Infernal Warriors source-profile audit)
+# Gaul Campaign Simulator — Alpha 0.6 (configurable Infernal Warriors musters)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -25,7 +25,7 @@ Use the **Profile status** filter and expand **Verification details** on each un
 
 ## What is *not* fully imported yet
 
-This is a tactical simulation, **not** a faithful renderer of every New Recruit selection graph or Warhammer tabletop rule. The importer now reads the catalogue’s **default required formation** (squad size and listed base points), resolves linked default weapon profiles and uses mixed-weapon attack counts. Other formation choices and equipment menus are shown for review, but are not yet freely selectable within a single simulated roster. Complex model-specific wound allocation, weapon traits, paid modifiers, detachments, stratagems, Leader attachments and faction mechanics remain simplified. If a source cost cannot be resolved, it is flagged **Est. points**; this is not the same as the Sim Estimate profile status. Do **not** use these profiles or Battle Lab results as validated army-list prices or competitive balance claims.
+This is a tactical simulation, **not** a faithful renderer of every New Recruit selection graph or Warhammer tabletop rule. The importer reads published formation size/points alternatives, resolves linked default and selected weapon options, and uses mixed-weapon attack counts. Infernal Warriors may choose published squad-size formations, supported flat per-model weapon menus, and eligible source-declared Leaders inside the Army Builder. Complex nested menus, cross-slot constraints, many special abilities, and model-by-model rules are still provisional. Complex model-specific wound allocation, weapon traits, paid modifiers, detachments, stratagems, Leader attachments and faction mechanics remain simplified. If a source cost cannot be resolved, it is flagged **Est. points**; this is not the same as the Sim Estimate profile status. Do **not** use these profiles or Battle Lab results as validated army-list prices or competitive balance claims.
 
 **Silver Tempests:** The source `Silver_Tempest.cat` currently has *zero* published root units. Its eight existing simulator playtest units remain selectable until that catalogue is populated.
 
@@ -44,9 +44,14 @@ GitHub Actions also downloads the public New Recruit source repository **read-on
 - [x] Live catalogue discovery and cache keyed to the source repository's file checksums.
 - [x] Searchable Army Builder and on-demand refresh.
 - [x] Infernal Warriors default formation sizes, published starting points and linked default weapon profiles and source-expressed special compositions (initial audit).
-- [ ] Exact loadout alternatives, model-by-model wound allocation, weapon traits and modifier-based points for all units.
-- [ ] Formal Leader attachments and cross-faction allied force rules.
+- [x] Infernal Warriors selectable formations, supported flat weapon options and eligible attached Leaders with saved configurations (alpha 0.6).
+- [ ] Full nested loadout alternatives, model-specific wound allocation, weapon traits, per-five/roster-wide limits and modifier-based points for all units.
+- [ ] Exact Leader attachment effects and full cross-faction allied force rules.
 - [ ] Terrain, line of sight, psychic mastery, engine containment and full faction abilities.
 - [ ] Multiplayer and narrative campaign persistence.
 
 Gaul Campaign Simulator is an independent non-commercial fan project, **not affiliated with or endorsed by Games Workshop**.
+
+## Alpha 0.6 notes
+
+See [Configurable Musters](docs/CONFIGURABLE_MUSTERS.md) for details of the editable squad-size, per-model wargear and Leader options, save-file source pinning, and the limitations that prevent a **Verified** combat badge. The original Gaul Campaign: Renegades catalogues remain untouched.
