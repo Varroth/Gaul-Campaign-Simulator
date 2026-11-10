@@ -60,8 +60,8 @@ function rosterMaximum(unit){
 // Only enforce quota expressions that correspond unambiguously to a weapon
 // family and a count. More complex source modifiers remain New Recruit-only.
 function wargearLimits(unit){
- const p=descendants(unit,'profile').find(x=>/^Wargear \/ legal alternatives$/i.test(value(x,'name')));
- const txt=field(p,'Description'); const out=[];
+ const p=descendants(unit,'profile').filter(x=>/^(?:Wargear \/ legal alternatives|Unit composition \/ selectable wargear)$/i.test(value(x,'name')));
+ const txt=p.map(x=>field(x,'Description')).join(' '); const out=[];
  if(/one model per (?:full )?5 may (?:take|replace[^.]*with) (?:a )?power weapon/i.test(txt))
   out.push({kind:'power',per:5,maximum:1,description:'One power weapon per five models'});
  if(/for every full five models,? one Reaver may replace autopistol with a hand flamer/i.test(txt))

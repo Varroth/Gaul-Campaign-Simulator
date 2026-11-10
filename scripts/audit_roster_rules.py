@@ -33,7 +33,7 @@ def leader_eligible(node):
 def wargear_rules(node):
     result=[]
     for prof in node.iter():
-        if local(prof)=='profile' and prof.get('name')=='Wargear / legal alternatives':
+        if local(prof)=='profile' and prof.get('name') in {'Wargear / legal alternatives','Unit composition / selectable wargear'}:
             result.extend(c.text or '' for c in prof.iter() if local(c)=='characteristic' and c.get('name')=='Description')
     return ' '.join(result)
 
