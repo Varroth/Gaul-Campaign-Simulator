@@ -9,12 +9,12 @@ test('all four source filenames are mapped',()=>assert.deepEqual(Object.keys(C.F
 test('cache is initially absent',()=>assert.equal(C.readCache(store()),null));
 test('cache rejects incompatible versions',()=>assert.equal(C.readCache(store({[C.CACHE_KEY]:JSON.stringify({v:99,cachedAt:Date.now(),catalogues:{}})})),null));
 test('cache persists safely without storing source XML',()=>{
- const storage=store(),data={v:2,cachedAt:Date.now(),catalogues:{IW:{version:'a1',revision:'9',units:[template('Unit A')]}}};
+ const storage=store(),data={v:3,cachedAt:Date.now(),catalogues:{IW:{version:'a1',revision:'9',units:[template('Unit A')]}}};
  assert.equal(C.writeCache(data,storage),true);
  const parsed=C.readCache(storage);assert.equal(parsed.catalogues.IW.units[0].name,'Unit A');assert.equal(parsed.catalogues.IW.version,'a1');
 });
 test('cache refuses malformed linked profiles',()=>{
- const data={v:2,cachedAt:Date.now(),catalogues:{IW:{units:[{id:'not-from-new-recruit',faction:'IW',points:30,name:'X'}]}}};
+ const data={v:3,cachedAt:Date.now(),catalogues:{IW:{units:[{id:'not-from-new-recruit',faction:'IW',points:30,name:'X'}]}}};
  assert.equal(C.readCache(store({[C.CACHE_KEY]:JSON.stringify(data)})),null);
 });
 test('engine adds a linked unit and keeps original playtest profiles',()=>{
@@ -50,7 +50,7 @@ test('readVersions falls back to the public manifest if GitHub API is unavailabl
 });
 test('offline sync preserves the last cached linked catalogue',async()=>{
  const storage=store();
- C.writeCache({v:2,cachedAt:Date.now(),catalogues:{IW:{version:'known',revision:'2',units:[template('Safe unit')]}}},storage);
+ C.writeCache({v:3,cachedAt:Date.now(),catalogues:{IW:{version:'known',revision:'2',units:[template('Safe unit')]}}},storage);
  const request=async()=>{throw Error('Offline');};
  const statuses=[];const result=await C.sync({request,storage,onStatus:x=>statuses.push(x)});
  assert.equal(result.ok,false);assert.equal(result.cached,true);assert.equal(result.counts.IW,1);

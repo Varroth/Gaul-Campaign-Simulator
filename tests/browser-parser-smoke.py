@@ -30,4 +30,20 @@ with sync_playwright() as p:
     assert {w['name']:w['count'] for w in report['loadout']}=={'Bolt pistol':4,'Plasma pistol':1,'Chainaxe':5},report
     assert report['verification']=='synced',report
     print('BROWSER SOURCE PARSER OK:',report['models'],'models,',report['points'],'pts,',report['loadout'])
+
+    # Exercise unusual composition encoding and serum restrictions.
+    extras='''<catalogue xmlns="http://www.battlescribe.net/schema/catalogueSchema"><selectionEntries>
+      <selectionEntry type="unit" id="letters" name="Bloodletters"><categoryLinks><categoryLink name="Khorne Allies"/></categoryLinks><costs><cost name="pts" value="125"/></costs><profiles><profile typeName="Unit"><characteristics><characteristic name="W">1</characteristic><characteristic name="T">4</characteristic></characteristics></profile></profiles><selectionEntryGroups><selectionEntryGroup name="10 Bloodletters" defaultSelectionEntryId="hellblade-choice"><selectionEntries><selectionEntry id="hellblade-choice" name="10 Hellblades" type="upgrade"><infoLinks><infoLink type="profile" targetId="hellblade"/></infoLinks></selectionEntry></selectionEntries></selectionEntryGroup></selectionEntryGroups></selectionEntry>
+      <selectionEntry type="unit" id="bikes" name="Attack Bike Flanking Section"><categoryLinks><categoryLink name="Mounted"/></categoryLinks><costs><cost name="pts" value="95"/></costs><rules><rule name="Composition"><description>Wargear / legal alternatives: Exactly TWO attack bikes. Twin boltguns and heavy bolter per bike.</description></rule></rules><profiles><profile typeName="Unit"><characteristics><characteristic name="W">5</characteristic></characteristics></profile></profiles></selectionEntry>
+      <selectionEntry type="unit" id="cohort" name="Lost Cohort — Power Armour"><selectionEntryGroups><selectionEntryGroup name="Required unit size and formation" defaultSelectionEntryId="cohort5"><selectionEntries><selectionEntry id="cohort5" name="5 afflicted + attached Infernal Chaplain (foot)" type="upgrade"><costs><cost name="pts" value="365"/></costs></selectionEntry></selectionEntries></selectionEntryGroup></selectionEntryGroups></selectionEntry>
+      </selectionEntries><sharedProfiles><profile id="hellblade" name="Hellblade" typeName="Weapon"><characteristics><characteristic name="Range">Melee</characteristic><characteristic name="A">3</characteristic><characteristic name="BS/WS">3+</characteristic><characteristic name="S">5</characteristic><characteristic name="AP">-1</characteristic><characteristic name="D">2</characteristic></characteristics></profile></sharedProfiles></catalogue>'''
+    extra=page.evaluate('xml => GaulCatalogue.parseCatalogue(xml,"IW","source-sha").units',extras)
+    letter=next(x for x in extra if x['name']=='Bloodletters')
+    assert letter['models']==10 and letter['points']==125 and letter['special']=={},letter
+    assert letter['loadout'][0]['count']==10,letter['loadout']
+    bike=next(x for x in extra if x['name']=='Attack Bike Flanking Section')
+    assert bike['models']==2 and bike['points']==95 and bike['special']=={'fnp':5,'regen':1},bike
+    lost=next(x for x in extra if x['name'].startswith('Lost Cohort'))
+    assert lost['models']==5 and lost['points']==365 and lost['special'].get('mandatoryChaplain') is True,lost
+    print('UNUSUAL COMPOSITIONS OK: 2 attack bikes, 10 daemons without serum, 5 Lost Cohort afflicted')
     browser.close()

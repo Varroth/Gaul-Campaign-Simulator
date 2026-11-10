@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.5 (Infernal Warriors source-profile audit)
+# Gaul Campaign Simulator — Alpha 0.5.1 (Infernal Warriors source-profile audit)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -43,7 +43,7 @@ GitHub Actions also downloads the public New Recruit source repository **read-on
 
 - [x] Live catalogue discovery and cache keyed to the source repository's file checksums.
 - [x] Searchable Army Builder and on-demand refresh.
-- [x] Infernal Warriors default formation sizes, published starting points and linked default weapon profiles (initial audit).
+- [x] Infernal Warriors default formation sizes, published starting points and linked default weapon profiles and source-expressed special compositions (initial audit).
 - [ ] Exact loadout alternatives, model-by-model wound allocation, weapon traits and modifier-based points for all units.
 - [ ] Formal Leader attachments and cross-faction allied force rules.
 - [ ] Terrain, line of sight, psychic mastery, engine containment and full faction abilities.

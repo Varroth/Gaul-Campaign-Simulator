@@ -60,8 +60,18 @@ def main():
         name=unit.get('name','')
         default,options=choices(unit)
         option_name=default.get('name','') if default is not None else None
-        match=re.search(r'\b(\d{1,2})\s+models?\b',option_name or '',re.I)
+        match=re.search(r'\b(\d{1,2})\s+(?:models?|afflicted)\b',option_name or '',re.I)
         models=int(match.group(1)) if match else None
+        if models is None:
+            descriptions=[(d.text or '') for d in unit.iter() if TAG(d)=='description']
+            matching=next((d for d in descriptions if 'Wargear / legal alternatives' in d), '')
+            bike=re.search(r'Exactly\s+(ONE|TWO|THREE|\d+)\s+attack bikes',matching,re.I)
+            daemon=re.search(r'(\d+)\s+Daemons\s+with',matching,re.I)
+            if bike: models={'ONE':1,'TWO':2,'THREE':3}.get(bike.group(1).upper(),int(bike.group(1)) if bike.group(1).isdigit() else None)
+            elif daemon and name=='Bloodletters': models=int(daemon.group(1))
+            else:
+                group=next((g for g in path(unit,'selectionEntryGroups','selectionEntryGroup') if re.match(r'^(\d+)\s+(?:Bloodletters|Flesh Hounds)$',g.get('name',''),re.I)),None)
+                if group is not None:models=int(re.match(r'^(\d+)',group.get('name')).group(1))
         points=price(default) if default is not None else price(unit)
         branches=walk_selected(default or unit)
         linked=[profiles.get(link.get('targetId')) for x in branches for link in path(x,'infoLinks','infoLink') if link.get('type')=='profile']
@@ -72,7 +82,7 @@ def main():
     print('INFERNAL_WARRIORS_AUDIT',json.dumps(summary,ensure_ascii=False))
     for item in result:
         print('UNIT',json.dumps(item,ensure_ascii=False,separators=(',',':')))
-    critical={'Infernal Berzerkers':(5,115),'Despoiler Cadre':(5,100),'Bloodmarked Thralls':(10,45),'Chainbound Reavers':(5,55),'Void Breachers':(5,115)}
+    critical={'Infernal Berzerkers':(5,115),'Despoiler Cadre':(5,100),'Bloodmarked Thralls':(10,45),'Chainbound Reavers':(5,55),'Void Breachers':(5,115),'Attack Bike Flanking Section':(2,95),'Bloodletters':(10,125),'Lost Cohort — Power Armour':(5,365),'Lost Cohort — Terminator Armour':(5,565)}
     by_name={x['name']:x for x in result}
     failures=[]
     for name,(models,points) in critical.items():
@@ -82,7 +92,7 @@ def main():
     if len(result)!=74 or failures:
         print('ERROR: Upstream source structure or expected default profiles changed:',failures)
         return 1
-    print('AUDIT_PASS: 74 root entries and five previously mispriced formations checked')
+    print('AUDIT_PASS: 74 root entries and nine source-grounded formations/compositions checked')
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

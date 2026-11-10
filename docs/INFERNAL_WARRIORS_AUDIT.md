@@ -1,4 +1,4 @@
-# Infernal Warriors — source-profile audit, first pass (Alpha 0.5)
+# Infernal Warriors — source-profile audit, first pass (Alpha 0.5.1)
 
 Source: the public `Infernal_Warriors.cat` from [Gaul-Campaign-Renegades](https://github.com/Varroth/Gaul-Campaign-Renegades), revision 24 (November 10, 2026). Its live blob SHA is checked during each browser sync. The simulator never writes back to the source repository.
 
@@ -23,6 +23,7 @@ Additional catalogues have varying organization structures and have not complete
 - Traverse the *selected* nested wargear menus; resolve default weapon `infoLink` references against the shared weapon profile definitions.
 - Count per-model weapons, including groups such as nine regular Thralls plus one specialist, instead of applying the strongest representative weapon to every model.
 - Resolve the chosen weapon profile's attacks, range, strength, penetration and damage; use distinct default ranged/melee weapons in attacks.
+- Correct special composition cases such as the Lost Cohort’s five afflicted (with Chaplain cost bundled), two Attack Bikes and ten Bloodletters. Exclude Khorne Daemon allies from Infernal Serum.
 - Keep the **Synced** label unless full unit, weapon-option, special-rule, attachment, points modifier and engine validation requirements have been met.
 
 ## Still required before any Verified badge

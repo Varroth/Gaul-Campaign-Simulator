@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v2';
-const CACHE_VERSION=2;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v3';
+const CACHE_VERSION=3;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.5';
+const RULESET_VERSION='alpha-0.5.1';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -67,7 +67,7 @@ function formation(unit){
  const entries=path(group,'selectionEntries','selectionEntry').filter(e=>value(e,'hidden')!=='true');
  if(!entries.length)return null;
  const choices=entries.map(e=>{
-  const label=value(e,'name'); const m=label.match(/(?:^|\b)(\d{1,2})\s+models?\b/i);
+  const label=value(e,'name'); const m=label.match(/(?:^|\b)(\d{1,2})\s+(?:models?|afflicted)\b/i);
   return {id:value(e,'id'),label,models:m?Number(m[1]):null,points:pointsFrom(e),element:e};
  });
  const selected=choices.find(e=>e.id===value(group,'defaultSelectionEntryId'))||choices[0];
@@ -80,7 +80,8 @@ function sourceWeapons(doc,unit,form,profileIndex){
   if(depth>maxDepth)return;
   const label=value(current,'name');
   const countMatch=label.match(/^(\d{1,2})\s+(?:(?:regular|standard|remaining)\s+)?(?:[A-Za-z][^—:]*?)(?:\s+[—:]|\s*—)/);
-  const count=countMatch&&countMatch[1]&&/regular|standard|thrall|reaver|warrior|marine|troop|servitor|scout/i.test(label)?Math.min(20,Number(countMatch[1])):1;
+  const plainSquadWeapon=label.match(/^(\d{1,2})\s+(?:Hellblades|Hellfangs|Crude blades|Chainaxes)$/i);
+  const count=countMatch&&countMatch[1]&&/regular|standard|thrall|reaver|warrior|marine|troop|servitor|scout/i.test(label)?Math.min(20,Number(countMatch[1])):plainSquadWeapon?Math.min(20,Number(plainSquadWeapon[1])):1;
   const copies=multiplier*count;
   for(const link of path(current,'infoLinks','infoLink')){
    if(value(link,'type')!=='profile')continue;
@@ -105,7 +106,7 @@ function sourceWeapons(doc,unit,form,profileIndex){
  for(const w of weapons){const key=w.mode+'|'+w.sourceProfileId;const prior=merged.get(key);if(prior)prior.count+=w.count;else merged.set(key,{...w});}
  return {weapons:[...merged.values()].slice(0,80),slots};
 }
-function isArmouredVehicle(name,category){return /vehicle|tank|dreadnought|daemon engine|artillery|transport|aircraft|land raider|rhino|predator|vindicat|defiler|crawler|gunship|drop pod|siege engine|automata/i.test(name+' '+category);}
+function isArmouredVehicle(name,category){return /vehicle|tank|dreadnought|daemon engine|artillery|transport|aircraft|land raider|speeder|rhino|predator|vindicat|defiler|crawler|gunship|drop pod|siege engine|automata/i.test(name+' '+category);}
 function collectUnitRoots(doc){
  const root=doc.documentElement,found=[],seen=new Set();
  const refs=new Map(descendants(root,'selectionEntry').filter(e=>value(e,'id')).map(e=>[value(e,'id'),e]));
@@ -128,6 +129,17 @@ function rootProfile(unit){
 function countFor(unit,name,cat){
  const formed=formation(unit)?.selected?.models;
  if(Number.isInteger(formed)&&formed>=1&&formed<=20)return formed;
+ // Some source units do not use a Required Formation menu. Where their
+ // composition text explicitly declares a quantity, respect that statement.
+ const lines=descendants(unit,'description').map(x=>x.textContent||'');
+ const declared=lines.find(x=>/Wargear \/ legal alternatives/i.test(x))||'';
+ const exact=declared.match(/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d{1,2})\s+attack bikes\b/i);
+ const named={ONE:1,TWO:2,THREE:3,FOUR:4,FIVE:5};
+ if(exact){const n=named[exact[1].toUpperCase()]||Number(exact[1]);if(n>0&&n<=20)return n;}
+ const daemons=declared.match(/\b(\d{1,2})\s+Daemons?\s+with\b/i);
+ if(daemons&&/^(Bloodletters|Flesh Hounds)$/i.test(name))return Number(daemons[1]);
+ const group=path(unit,'selectionEntryGroups','selectionEntryGroup').find(g=>/^(\d{1,2})\s+(?:Bloodletters|Flesh Hounds)$/i.test(value(g,'name')));
+ if(group)return Number(value(group,'name').match(/^(\d+)/)[1]);
  const troop=descendants(unit,'selectionEntry').filter(n=>value(n,'type')==='model');
  const count=troop.reduce((n,x)=>n+minModels(x),0);
  if(count>0)return Math.min(count,20);
@@ -195,13 +207,14 @@ function reviewNotes(unit){
  const points=a.points==='formation'?'Starting points taken from the default required unit-size option (other sizes and extras may change the total).':a.points==='direct'?'Points read from the unit entry.':a.points==='per-model'?'Points extrapolated from a model entry; roster modifiers may change them.':'Points are a simulator estimate, not a published roster cost.';
  return [points,
   a.unitStats==='source'?'Unit characteristics read from the linked profile; movement is converted to grid squares.':'Some characteristics use simulator defaults.',
-  a.modelCount==='declared'?'Default unit-size option selected directly from the catalogue.':'Starting model count is a simulator approximation.',
-  a.ranged==='source'?'A ranged weapon profile was found; one representative profile is used.':'Ranged attacks use a simulator fallback.',
-  a.melee==='source'?'A melee weapon profile was found; one representative profile is used.':'Melee attacks use a simulator fallback.',
+  a.modelCount==='declared'?'Starting model count read from the source formation or explicit composition.':'Starting model count is a simulator approximation.',
+  a.ranged==='source'?'Ranged weapons resolved from selected default equipment; different weapons fire separately.':'Ranged attacks use a simulator fallback.',
+  a.melee==='source'?'Melee weapons resolved from selected default equipment; different weapons attack separately.':'Melee attacks use a simulator fallback.',
   unit.loadout?.length?`Default equipment: ${unit.loadout.slice(0,24).map(w=>`${w.count}× ${w.name} (${w.mode})`).join('; ')}${unit.loadout.length>24?'; additional profiles omitted':''}. Alternative equipment is not yet selectable.`:'Weapon links in the default equipment could not be fully resolved.',
   unit.sizeOptions?.length?`Published size options: ${unit.sizeOptions.map(x=>`${x.label}${Number.isFinite(x.points)?' ('+x.points+' pts)':''}`).slice(0,14).join('; ')}. The simulator currently uses only the default size.`:'No explicit size options were identified.',
+  unit.special?.mandatoryChaplain?'Lost Cohort default cost includes its mandatory attached Chaplain; attachment and control tests remain unmodeled.':null,
   statusFor(unit)==='verified'?'Full combat mapping reviewed and pinned to this catalogue revision.':'Wargear alternatives, restrictions and special rules have NOT been fully verified for the combat engine.'
- ];
+ ].filter(Boolean);
 }
 function parseCatalogue(xml,faction,sourceVersion=''){
  if(!(faction in FILES))throw Error('Unknown catalogue faction.');
@@ -217,11 +230,12 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   const linked=sourceWeapons(doc,node,form,profileIndex);
   const cat=categoryFor(node),stats=getStats(node,name,cat),models=countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
-  const vehicle=isArmouredVehicle(name,cat),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
-  const special=faction==='IW'&&!vehicle&&!mortal?{fnp:5,regen:1}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
+  const vehicle=isArmouredVehicle(name,cat),daemon=/Khorne Allies|\bDAEMON\b/i.test(cat)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
+  const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
   const profile=rootProfile(node);
   const fieldCoverage=['M','T','Sv','W','OC'].every(key=>!!field(profile,key));
-  const declaredModels=!!form?.selected?.models||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
+  const sourceComposition=!!form?.selected?.models||!!descendants(node,'description').find(x=>/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d+)\s+attack bikes\b|\b10\s+Daemons\s+with\b/i.test(x.textContent||''));
+  const declaredModels=sourceComposition||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
   const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
    ranged:(()=>{const found=linked.weapons.filter(w=>w.mode==='ranged');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.ranged;})(),
    melee:(()=>{const found=linked.weapons.filter(w=>w.mode==='melee');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.melee;})(),
