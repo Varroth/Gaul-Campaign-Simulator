@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v3';
-const CACHE_VERSION=3;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v4';
+const CACHE_VERSION=4;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.5.1';
+const RULESET_VERSION='alpha-0.5.2';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -131,7 +131,7 @@ function countFor(unit,name,cat){
  if(Number.isInteger(formed)&&formed>=1&&formed<=20)return formed;
  // Some source units do not use a Required Formation menu. Where their
  // composition text explicitly declares a quantity, respect that statement.
- const lines=descendants(unit,'description').map(x=>x.textContent||'');
+ const lines=[...descendants(unit,'description'),...descendants(unit,'characteristic').filter(x=>value(x,'name')==='Description')].map(x=>x.textContent||'');
  const declared=lines.find(x=>/Wargear \/ legal alternatives/i.test(x))||'';
  const exact=declared.match(/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d{1,2})\s+attack bikes\b/i);
  const named={ONE:1,TWO:2,THREE:3,FOUR:4,FIVE:5};
@@ -234,7 +234,7 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
   const profile=rootProfile(node);
   const fieldCoverage=['M','T','Sv','W','OC'].every(key=>!!field(profile,key));
-  const sourceComposition=!!form?.selected?.models||!!descendants(node,'description').find(x=>/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d+)\s+attack bikes\b|\b10\s+Daemons\s+with\b/i.test(x.textContent||''));
+  const sourceComposition=!!form?.selected?.models||!![...descendants(node,'description'),...descendants(node,'characteristic').filter(x=>value(x,'name')==='Description')].find(x=>/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d+)\s+attack bikes\b|\b10\s+Daemons\s+with\b/i.test(x.textContent||''));
   const declaredModels=sourceComposition||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
   const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
    ranged:(()=>{const found=linked.weapons.filter(w=>w.mode==='ranged');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.ranged;})(),

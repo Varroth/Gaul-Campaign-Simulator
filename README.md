@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.5.1 (Infernal Warriors source-profile audit)
+# Gaul Campaign Simulator — Alpha 0.5.2 (Infernal Warriors source-profile audit)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 

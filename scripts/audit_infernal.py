@@ -63,7 +63,7 @@ def main():
         match=re.search(r'\b(\d{1,2})\s+(?:models?|afflicted)\b',option_name or '',re.I)
         models=int(match.group(1)) if match else None
         if models is None:
-            descriptions=[(d.text or '') for d in unit.iter() if TAG(d)=='description']
+            descriptions=[(d.text or '') for d in unit.iter() if TAG(d)=='description' or (TAG(d)=='characteristic' and d.get('name')=='Description')]
             matching=next((d for d in descriptions if 'Wargear / legal alternatives' in d), '')
             bike=re.search(r'Exactly\s+(ONE|TWO|THREE|\d+)\s+attack bikes',matching,re.I)
             daemon=re.search(r'(\d+)\s+Daemons\s+with',matching,re.I)
@@ -82,7 +82,7 @@ def main():
     print('INFERNAL_WARRIORS_AUDIT',json.dumps(summary,ensure_ascii=False))
     for item in result:
         print('UNIT',json.dumps(item,ensure_ascii=False,separators=(',',':')))
-    critical={'Infernal Berzerkers':(5,115),'Despoiler Cadre':(5,100),'Bloodmarked Thralls':(10,45),'Chainbound Reavers':(5,55),'Void Breachers':(5,115),'Attack Bike Flanking Section':(2,95),'Bloodletters':(10,125),'Lost Cohort — Power Armour':(5,365),'Lost Cohort — Terminator Armour':(5,565)}
+    critical={'Infernal Berzerkers':(5,115),'Despoiler Cadre':(5,100),'Bloodmarked Thralls':(10,45),'Chainbound Reavers':(5,55),'Void Breachers':(5,115),'Attack Bike Flanking Section':(2,95),'Bloodletters':(10,125),'Lost Cohort — Power Armour':(10,365),'Lost Cohort — Terminator Armour':(10,565)}
     by_name={x['name']:x for x in result}
     failures=[]
     for name,(models,points) in critical.items():

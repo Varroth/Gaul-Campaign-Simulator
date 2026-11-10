@@ -1,4 +1,4 @@
-# Combat-profile verification policy (Alpha 0.5.1)
+# Combat-profile verification policy (Alpha 0.5.2)
 
 This policy deliberately keeps importing a unit separate from certifying that the simulator reproduces it faithfully. **An imported unit is not Verified merely because the XML contains a points cost or a weapon profile.**
 
@@ -17,6 +17,6 @@ This policy deliberately keeps importing a unit separate from certifying that th
 5. **Composition:** Legal squad/model quantities and roster restrictions, even if the simulator enforces more conservative limitations.
 6. **Engine:** Combat execution and AI test cases cover the rule interactions using deterministic reproducible examples.
 
-The first release has **zero fully Verified units**. This is intentional: the Alpha 0.5.1 engine still uses one representative ranged/melee weapon per unit and does not simulate every wargear option, attachment or faction rule. Until a complete unit mapping and the associated regression tests exist, a Sync badge is the accurate label.
+The first release has **zero fully Verified units**. This is intentional: the Alpha 0.5.2 engine still uses one representative ranged/melee weapon per unit and does not simulate every wargear option, attachment or faction rule. Until a complete unit mapping and the associated regression tests exist, a Sync badge is the accurate label.
 
 A reviewer must add a new ledger entry after the full checks and tests. Source changes or engine-version changes automatically downgrade the badge to **Synced** until a repeat review. Existing simulator profiles are not modified by this policy.
