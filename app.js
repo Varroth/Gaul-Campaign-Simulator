@@ -36,7 +36,7 @@ function isTargetable(attacker,target){
  const g=state.game;
  if(g.finished||!attacker||!target||attacker.models===0||attacker.side!=='player'||target.side!=='enemy'||target.models===0)return false;
  const dist=E.distance(attacker,target),t=tFor(attacker);
- if(g.phase==='shooting')return !attacker.shot&&dist>1&&dist<=t.ranged.range;
+ if(g.phase==='shooting')return !attacker.shot&&dist>1&&dist<=t.ranged.range&&E.hasLineOfSight(attacker,target);
  if(g.phase==='charge')return E.canCharge(g,attacker.uid,target.uid);
  if(g.phase==='fight')return !attacker.fought&&dist<=t.melee.range;
  return false;

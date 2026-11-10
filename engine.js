@@ -95,6 +95,24 @@ function d(game,n){return 1+Math.floor(random(game)*n);}
 function key(x,y){return `${x},${y}`;}
 function validCell(x,y){return Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<WIDTH&&y<HEIGHT&&!WALLS.has(key(x,y));}
 function distance(a,b){return Math.abs(a.x-b.x)+Math.abs(a.y-b.y);}
+// Deterministic, conservative wall occlusion on the grid. Corners touching a
+// wall block shots; units and cover do not yet block line of sight.
+function hasLineOfSight(from,to){
+ const dx=to.x-from.x,dy=to.y-from.y,nx=Math.abs(dx),ny=Math.abs(dy);
+ const sx=Math.sign(dx),sy=Math.sign(dy);
+ let x=from.x,y=from.y,ix=0,iy=0;
+ if(!Number.isInteger(x)||!Number.isInteger(y)||!Number.isInteger(to.x)||!Number.isInteger(to.y))return false;
+ while(ix<nx||iy<ny){
+  const horizontal=(1+2*ix)*ny,vertical=(1+2*iy)*nx;
+  if(horizontal===vertical){
+   if(WALLS.has(key(x+sx,y))||WALLS.has(key(x,y+sy)))return false;
+   x+=sx;y+=sy;ix++;iy++;
+  }else if(horizontal<vertical){x+=sx;ix++;}
+  else{y+=sy;iy++;}
+  if(WALLS.has(key(x,y)))return false;
+ }
+ return true;
+}
 function total(muster){return muster.reduce((n,id)=>n+(BY_ID[id]?.points||0),0);}
 // The catalogue declares per-datasheet maximums. These are army-wide even if
 // the player selects different squad sizes or creates different gear variants.
@@ -365,6 +383,7 @@ function attack(g,attackerId,targetId,mode){
  if(!a||!b||a.side===b.side||a.side!==g.active)return {ok:false,message:'Select a living allied attacker and an enemy target.'};
  if(g.phase!==(mode==='ranged'?'shooting':'fight'))return {ok:false,message:'Wrong combat phase.'};
  if(mode==='ranged'&&a.shot||mode==='melee'&&a.fought)return {ok:false,message:'That unit has already attacked this phase.'};
+  if(mode==='ranged'&&!hasLineOfSight(a,b))return {ok:false,message:'A wall blocks line of sight to that target.'};
  const at=template(a),bt=template(b),dist=distance(a,b);
  if(a.control==='pursuit'&&nearestEnemy(g,a)?.uid!==targetId)return {ok:false,message:'Aggressive Pursuit: the Lost Cohort must target its nearest enemy.'};
  const engaged=living(g,a.side==='player'?'enemy':'player').some(u=>distance(a,u)<=1);
@@ -552,7 +571,7 @@ function aiTurn(g,side,options={}){
   g.phase='shooting';
   for(const a of [...living(g,side)]){
    if(a.shot)continue;
-   const targets=living(g,side==='player'?'enemy':'player').filter(b=>(a.control!=='pursuit'||nearestEnemy(g,a)?.uid===b.uid)&&distance(a,b)<=template(a).ranged.range&&distance(a,b)>1).sort((x,y)=>distance(a,x)-distance(a,y));
+   const targets=living(g,side==='player'?'enemy':'player').filter(b=>(a.control!=='pursuit'||nearestEnemy(g,a)?.uid===b.uid)&&distance(a,b)<=template(a).ranged.range&&distance(a,b)>1&&hasLineOfSight(a,b)).sort((x,y)=>distance(a,x)-distance(a,y));
    if(targets.length)attack(g,a.uid,targets[0].uid,'ranged');
   }
  }
@@ -632,5 +651,5 @@ function validateLoadedState(g){
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

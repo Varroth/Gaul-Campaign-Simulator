@@ -19,10 +19,15 @@
 
 ## Not fully implemented
 
-The following require additional game-engine subsystems, not merely more UI selectors: full reserves/deep strike and turn-one Cohort Insertion, line of sight, exact inch-based movement and aura boundaries, terrain categories, transport embarkation/capacity/disembarkation, advanced weapon interactions, full Battle-shock/mission action restrictions, stratagems and Detachment Points, all enhancements, model-by-model allocation for mixed-stat squads, aircraft travel/hover, all multiple nested New Recruit equipment conditions, and every specialized unit ability. The unit profile status remains **Synced**, never automatically **Verified**.
+The following require additional game-engine subsystems, not merely more UI selectors: full reserves/deep strike and turn-one Cohort Insertion, exact model/terrain line of sight (only wall-occlusion has been added), exact inch-based movement and aura boundaries, terrain categories, transport embarkation/capacity/disembarkation, advanced weapon interactions, full Battle-shock/mission action restrictions, stratagems and Detachment Points, all enhancements, model-by-model allocation for mixed-stat squads, aircraft travel/hover, all multiple nested New Recruit equipment conditions, and every specialized unit ability. The unit profile status remains **Synced**, never automatically **Verified**.
 
 ## Source coverage and regression
 
 `node --test tests/*.test.cjs` checks unit setup, selection limits, mixed gear, damage and combat effects. Browser smoke tests cover GUI selection and the actual source-XML parser. GitHub Actions also checks source XML structure and a live derived named-ability coverage report using `scripts/audit_abilities.py`.
 
 **Interpretation:** “Source ability: Modeled” means a specific combat effect has a tested simplified implementation; it does **not** certify the entire datasheet or official 40K rules. “Partial” means only some source conditions are represented. “Reference only” means the source text is visible but has no battle effect yet. All unit points/advanced rules must be cross-checked with New Recruit before real tabletop use.
+
+
+## Incremental individual-unit verification pass
+
+The engine now blocks ranged attacks through impassable wall tiles, including shots that only touch a wall corner. The AI and highlighted human targets apply the same obstruction check. This is **not** full line of sight: models, terrain height, aircraft and visibility rules are still approximations. No new Verified badges were awarded by this upgrade.
