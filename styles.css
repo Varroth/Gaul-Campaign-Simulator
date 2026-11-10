@@ -45,3 +45,5 @@
 .muster-editor select{margin-top:5px;max-width:100%;text-overflow:ellipsis}
 .gear-editor{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:9px;max-height:430px;overflow:auto;padding:2px}
 .muster-editor .muted{margin:0}
+
+.muster-rule-warning{border:1px solid #b76654;background:rgba(168,67,46,.13);color:#f5ccba;border-radius:6px;padding:9px 12px;font-size:12px;margin:10px 0}

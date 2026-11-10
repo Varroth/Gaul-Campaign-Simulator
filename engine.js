@@ -96,9 +96,35 @@ function key(x,y){return `${x},${y}`;}
 function validCell(x,y){return Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<WIDTH&&y<HEIGHT&&!WALLS.has(key(x,y));}
 function distance(a,b){return Math.abs(a.x-b.x)+Math.abs(a.y-b.y);}
 function total(muster){return muster.reduce((n,id)=>n+(BY_ID[id]?.points||0),0);}
+// The catalogue declares per-datasheet maximums. These are army-wide even if
+// the player selects different squad sizes or creates different gear variants.
+// Rules not represented here (detachment costs, allied quotas, roster-wide
+// enhancement conditions) must still be validated in New Recruit.
+function musterProblems(ids){
+ const errors=[],count=new Map(),named=new Set();let lost=0;
+ if(!Array.isArray(ids)||!ids.length||ids.length>14)return ['Musters must contain 1–14 units.'];
+ for(const id of ids){
+  const t=BY_ID[id];if(!t){errors.push(`Unrecognized unit: ${id}`);continue;}
+  const base=BY_ID[t.baseId]||t;
+  const key=base.sourceId||base.id,used=(count.get(key)||0)+1;count.set(key,used);
+  if(Number.isInteger(base.rosterMax)&&used>base.rosterMax)errors.push(`${base.name}: New Recruit allows at most ${base.rosterMax} per army.`);
+  if(base.faction==='IW'&&base.special?.lost&&++lost>2)errors.push('Lost Cohort: maximum two squads combined, regardless of armour type.');
+  const leaders=[];
+  if(base.isLeader)leaders.push({id:base.id,name:base.name});
+  if(t.leaderId&&t.leader)leaders.push({id:t.leaderId,name:t.leader.name});
+  for(const leader of leaders){
+   if(/^Infernal (?:Terminator )?Chaplain$/i.test(leader.name))continue;
+   if(named.has(leader.id))errors.push(`${leader.name}: a named Leader cannot appear twice in one army (attached or independent).`);
+   named.add(leader.id);
+  }
+ }
+ return [...new Set(errors)];
+}
+
 function createGame(options={}){
  const pm=Array.isArray(options.player)?options.player:DEFAULT_PLAYER, em=Array.isArray(options.enemy)?options.enemy:DEFAULT_ENEMY;
- if(!pm.length||!em.length||pm.length>14||em.length>14||pm.some(id=>!BY_ID[id])||em.some(id=>!BY_ID[id]))throw Error('Musters must contain 1–14 recognized units per side.');
+ const invalid=[...musterProblems(pm),...musterProblems(em)];
+ if(invalid.length)throw Error('Illegal muster: '+invalid[0]);
  const seed=Number.isFinite(+options.seed)?(+options.seed>>>0):7126;
  const game={version:2,seed,seedState:seed||1,round:1,phase:'movement',active:'player',finished:false,winner:null,score:{player:0,enemy:0},units:[],log:[],objectives:OBJECTIVES.map(o=>({...o})),settings:{player:[...pm],enemy:[...em]}};
  const used=new Set();
@@ -114,6 +140,7 @@ function createGame(options={}){
   });
  }
  place(pm,'player');place(em,'enemy');
+ startTurn(game,'player');
  writeLog(game,`Battle started. ${pm.length} friendly and ${em.length} opposing units. Seed ${seed}.`);
  return game;
 }
@@ -129,6 +156,17 @@ function startTurn(g,side){
  g.active=side;g.phase='movement';
  for(const u of living(g,side)){
   u.moved=false;u.shot=false;u.charged=false;u.fought=false;
+  // Warp-Aggravated Pain: at each Command phase ordinary IW Astartes within
+  // 12 inches (six 2-inch cells) of an enemy PSYKER/DAEMON roll D6; on 1–2
+  // they suffer -1 ranged Hit until their next Command phase. Lost Cohort and
+  // mortal/daemon allies do not use this ordinary test.
+  u.painPenalty=0;
+  const t=template(u),ordinary=t.faction==='IW'&&t.special.fnp&&!t.special.lost&&t.special.painSensitive!==false;
+  if(ordinary&&living(g,side==='player'?'enemy':'player').some(enemy=>{
+   const x=template(enemy);return (x.special.psychic||x.special.daemon)&&distance(u,enemy)<=6;
+  })&&d6(g)<=2){
+   u.painPenalty=1;writeLog(g,`${t.name} failed its Warp-Aggravated Pain test: -1 ranged Hit until next Command phase.`);
+  }
   if(template(u).special.regen && u.injury>0){u.injury=Math.max(0,u.injury-template(u).special.regen);}
  }
 }
@@ -153,6 +191,17 @@ function move(g,uid,x,y){if(!canMove(g,uid,x,y))return {ok:false,message:'Illega
  const u=g.units.find(u=>u.uid===uid);u.x=x;u.y=y;u.moved=true;writeLog(g,`${template(u).name} moved to ${x+1},${y+1}.`);return {ok:true};}
 function woundTarget(s,t){if(s>=t*2)return 2;if(s>t)return 3;if(s===t)return 4;if(s*2<=t)return 6;return 5;}
 function nullifierNear(g,defender){return living(g,defender.side).some(u=>template(u).special.nullifier&&distance(u,defender)<=2);}
+// Implement a conservative subset of named weapon traits. [test] annotations
+// in New Recruit remain playtest rules and are not a Verified combat mapping.
+function weaponTraits(w){
+ const raw=String(w?.traits||'').toLowerCase();
+ const flag=t=>new RegExp('(?:^|[\\s,;])'+t+'(?:[\\s,;\\[]|$)','i').test(raw);
+ const n=key=>Number(raw.match(new RegExp('\\b'+key+'\\s+(\\d+)','i'))?.[1]||0);
+ return {torrent:flag('torrent'),pistol:flag('pistol'),heavy:flag('heavy'),twinLinked:/twin-linked/.test(raw),
+  ignoresCover:/ignores cover/.test(raw),lethalHits:/lethal hits/.test(raw),
+  devastatingWounds:/devastating wounds/.test(raw),rapidFire:n('rapid fire'),melta:n('melta'),
+  sustainedHits:n('sustained hits'),blast:flag('blast')};
+}
 // Linked New Recruit defaults can include mixed weapons (e.g. four bolters
 // and a plasma pistol). Resolve those profiles separately instead of giving
 // every model the strongest representative gun. Equipment choices and special
@@ -172,32 +221,57 @@ function attack(g,attackerId,targetId,mode){
  if(g.phase!==(mode==='ranged'?'shooting':'fight'))return {ok:false,message:'Wrong combat phase.'};
  if(mode==='ranged'&&a.shot||mode==='melee'&&a.fought)return {ok:false,message:'That unit has already attacked this phase.'};
  const at=template(a),bt=template(b),dist=distance(a,b);
- const weapons=attackProfiles(at,mode,a.models).filter(w=>w.range>=dist&&w.activeCount>0);
+ const engaged=living(g,a.side==='player'?'enemy':'player').some(u=>distance(a,u)<=1);
+ const weapons=attackProfiles(at,mode,a.models).filter(w=>w.range>=dist&&w.activeCount>0&&
+  (mode!=='ranged'||!engaged||(dist<=1&&weaponTraits(w).pistol)));
  if(!weapons.length)return {ok:false,message:`No equipped ${mode==='ranged'?'ranged':'melee'} weapon can attack at this range.`};
- if(mode==='ranged'&&dist<=1)return {ok:false,message:'Units in engagement range cannot shoot in this simplified ruleset.'};
+ if(mode==='ranged'&&dist<=1&&!weapons.length)return {ok:false,message:'Only Pistol weapons can fire while engaged.'};
  if(mode==='ranged')a.shot=true;else a.fought=true;
  let hits=0,wounds=0,unsaved=0,casualties=0,effective=0,attacks=0;
  for(const weapon of weapons){
-  const attempts=Math.min(80-attacks,weapon.activeCount*weapon.attacks);
+  const tr=weaponTraits(weapon);
+  const bonus=mode==='ranged'&&dist<=weapon.range/2;
+  const base=weapon.activeCount*weapon.attacks;
+  const blast=mode==='ranged'&&tr.blast?Math.floor(b.models/5)*weapon.activeCount:0;
+  const attempts=Math.min(80-attacks,base+(bonus?tr.rapidFire*weapon.activeCount:0)+blast);
   if(attempts<=0)break;attacks+=attempts;
-  const hitRoll=clamp(weapon.skill+((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0),2,6);
+  const hitRoll=clamp(weapon.skill+((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+
+   ((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0)+
+   (mode==='ranged'?(a.painPenalty||0):0)-
+   (mode==='ranged'&&tr.heavy&&!a.moved?1:0),2,6);
+  // Lethal Hits and Sustained Hits are checked on an unmodified hit roll of 6.
+  // Each successful hit is then resolved against the current surviving model.
   for(let i=0;i<attempts&&b.models>0;i++){
-   if(d6(g)<hitRoll)continue;hits++;
-   const defenderProfile=bt.leader&&b.models===1?bt.leader:bt;
-   if(d6(g)<woundTarget(weapon.s,defenderProfile.t))continue;wounds++;
-   const coverBonus=mode==='ranged'&&COVER.has(key(b.x,b.y))?1:0;
-   const save=clamp(defenderProfile.save+weapon.ap-coverBonus,2,7);
-   if(save<=6&&d6(g)>=save)continue;
-   unsaved++;
-   // Damage does not spill across models. FNP is rolled per point of damage.
-   const lastLeader=bt.leader&&b.models===1;
-   const wp=lastLeader?bt.leader.wp:bt.wp;
-   const special=lastLeader?bt.leader.special||{}:bt.special;
-   const remaining=wp-b.injury,rawDamage=Math.min(weapon.damage,remaining);
-   let damage=0;
-   for(let p=0;p<rawDamage;p++)if(!(special.fnp&&d6(g)>=special.fnp))damage++;
-   b.injury+=damage;effective+=damage;
-   if(b.injury>=wp){b.models--;b.injury=0;casualties++;}
+   const roll=tr.torrent?6:d6(g),critical=tr.torrent?false:roll===6;
+   if(!tr.torrent&&roll<hitRoll)continue;
+   const repeat=critical?1+tr.sustainedHits:1;
+   for(let extra=0;extra<repeat&&b.models>0;extra++){
+    hits++;
+    const defenderProfile=bt.leader&&b.models===1?bt.leader:bt;
+    const autoWound=critical&&extra===0&&tr.lethalHits;
+    let wr=autoWound?6:d6(g);
+    if(!autoWound&&wr<woundTarget(weapon.s,defenderProfile.t)&&tr.twinLinked)wr=d6(g);
+    if(!autoWound&&wr<woundTarget(weapon.s,defenderProfile.t))continue;
+    wounds++;
+    const bypass=tr.devastatingWounds&&!autoWound&&wr===6;
+    if(!bypass){
+     const coverBonus=mode==='ranged'&&!tr.ignoresCover&&COVER.has(key(b.x,b.y))?1:0;
+     const save=clamp(defenderProfile.save+weapon.ap-coverBonus,2,7);
+     if(save<=6&&d6(g)>=save)continue;
+    }
+    unsaved++;
+    const lastLeader=bt.leader&&b.models===1;
+    const wp=lastLeader?bt.leader.wp:bt.wp;
+    const special=lastLeader?bt.leader.special||{}:bt.special;
+    // FNP is rolled for *every* point of unsaved damage, not just those
+    // needed to kill the current model. Excess damage does not spill over.
+    const rawDamage=weapon.damage+(mode==='ranged'&&bonus?tr.melta:0);
+    let damage=0;
+    for(let p=0;p<rawDamage;p++)if(!(special.fnp&&d6(g)>=special.fnp))damage++;
+    const applied=Math.min(damage,wp-b.injury);
+    b.injury+=applied;effective+=applied;
+    if(b.injury>=wp){b.models--;b.injury=0;casualties++;}
+   }
   }
  }
  writeLog(g,`${at.name} ${mode==='ranged'?'fired on':'struck'} ${bt.name}: ${hits}/${attacks} hits, ${wounds} wounds, ${effective} damage, ${casualties} models removed${b.models===0?' — DESTROYED':''}.`);
@@ -324,7 +398,9 @@ function validateLoadedState(g){
  if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
  if(g.units.filter(u=>u.models>0).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
+ if(musterProblems(g.settings.player).length||musterProblems(g.settings.enemy).length)throw Error('Saved muster violates current source catalogue limits.');
+ if(g.units.some(u=>u.painPenalty!==undefined&&u.painPenalty!==0&&u.painPenalty!==1))throw Error('Save contains invalid Pain-Control state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,attackProfiles,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,attackProfiles,weaponTraits,startTurn,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

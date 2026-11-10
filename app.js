@@ -68,8 +68,8 @@ function renderInspector(){
  <div class="stat-row"><div class="stat"><b>${t.t}</b><small>T</small></div><div class="stat"><b>${t.save}+</b><small>Sv</small></div><div class="stat"><b>${t.move}</b><small>Move</small></div><div class="stat"><b>${t.oc}</b><small>OC/model</small></div></div>
  <div class="attack-line"><strong>Ranged</strong> · ${t.ranged.attacks}A × model · R${t.ranged.range} · S${t.ranged.s} · AP−${t.ranged.ap} · D${t.ranged.damage} · ${t.ranged.skill}+</div>
  <div class="attack-line"><strong>Melee</strong> · ${t.melee.attacks}A × model · S${t.melee.s} · AP−${t.melee.ap} · D${t.melee.damage} · ${t.melee.skill}+</div>
- ${t.loadout?.length?`<details class="unit-audit"><summary>New Recruit default weapons (${t.loadout.length} types)</summary><ul>${t.loadout.slice(0,30).map(w=>`<li>${w.count}× ${html(w.name)} · ${html(w.mode)} · A${w.attacks} / S${w.s} / AP−${w.ap} / D${w.damage}</li>`).join('')}</ul></details>`:''}
- <p class="profile-note">${tierTag(t)} ${html(t.description)}</p><p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
+ ${t.loadout?.length?`<details class="unit-audit"><summary>New Recruit default weapons (${t.loadout.length} types)</summary><ul>${t.loadout.slice(0,30).map(w=>`<li>${w.count}× ${html(w.name)} · ${html(w.mode)} · A${w.attacks} / S${w.s} / AP−${w.ap} / D${w.damage}${w.traits?` · ${html(w.traits)}`:''}</li>`).join('')}</ul></details>`:''}
+ <p class="profile-note">${tierTag(t)} ${html(t.description)}</p>${u.painPenalty?'<p class="muster-rule-warning">Warp-Aggravated Pain: −1 ranged Hit until your next Command phase.</p>':''}<p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
 }
 function renderObjectives(){
  const g=state.game;
@@ -143,7 +143,10 @@ function updateConfiguration(side,index,kind,selected,slotId){
   const variant=LIVE.configureUnit(base,opts,allLeaders);
   // A named Hero may not be attached to two different units in one army.
   if(variant.leaderId&&variant.leader?.name!=='Infernal Chaplain'&&state.musters[side].some((id,i)=>i!==index&&E.BY_ID[id]?.leaderId===variant.leaderId))throw Error('This named Leader is already attached to another squad.');
-  E.registerConfiguration(variant);state.musters[side][index]=variant.id;renderBuilder();
+  E.registerConfiguration(variant);
+  const updated=[...state.musters[side]];updated[index]=variant.id;
+  const errors=E.musterProblems(updated);if(errors.length)throw Error(errors[0]);
+  state.musters[side]=updated;renderBuilder();
  }catch(error){showSyncStatus('Configuration rejected',error.message);renderBuilder();}
 }
 function configuredSpecs(){
@@ -176,7 +179,7 @@ function renderBuilder(){
  if($('unit-search').value!==state.search)$('unit-search').value=state.search;
  $('verification-counts').textContent=`${counts.verified} Verified · ${counts.synced} Synced · ${counts['sim-estimate']} Sim Estimate`;
  $('catalogue-count').textContent=`(${list.length} available${needle||state.tierFilter!=='ALL'?' · filtered':''})`;
- $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span> ${tierTag(t)}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p><details class="unit-audit"><summary>Verification details</summary><ul>${profileNotes(t).map(note=>`<li>${html(note)}</li>`).join('')}</ul></details></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):
+ $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span> ${tierTag(t)}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p><details class="unit-audit"><summary>Verification details</summary><ul>${profileNotes(t).map(note=>`<li>${html(note)}</li>`).join('')}</ul></details></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit||E.musterProblems([...state.musters[side],t.id]).length?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):
  state.tierFilter==='verified'?'<p class="muted">No units are fully Verified yet. Use Synced to play with imported profiles while we audit their weapons, points, abilities and restrictions.</p>':'<p class="muted">No matching units. Change the faction, verification filter or search terms.</p>';
  $('muster-list').innerHTML=['player','enemy'].map(s=>{
   const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
@@ -184,8 +187,8 @@ function renderBuilder(){
  ${state.musters[s].length?state.musters[s].map((id,i)=>{const t=E.BY_ID[id],base=E.BY_ID[t?.baseId]||t,stale=!!(t?.baseId&&t.sourceVersion!==base?.sourceVersion);
   return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}</span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
  }).join(''):'<p class="muted">No units selected.</p>'}</div>`;
- }).join('');
- $('apply-musters').disabled=!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;}));
+ }).join('') + ['player','enemy'].flatMap(s=>E.musterProblems(state.musters[s]).map(err=>`<p class="muster-rule-warning" role="alert">${s==='player'?'Friendly':'Opposing'}: ${html(err)}</p>`)).join('');
+ $('apply-musters').disabled=!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;})||E.musterProblems(state.musters[s]).length>0);
 }
 function showSyncStatus(status,detail){
  const el=$('catalogue-sync-status'),desc=$('catalogue-sync-detail');
@@ -215,7 +218,13 @@ async function syncCatalogues(force=false){
  }catch(error){showSyncStatus('Catalogue synchronization unavailable',`${error.message}. Existing units remain selectable.`);}
  finally{state.lastSyncCheck=Date.now();state.syncRunning=false;$('refresh-catalogues').disabled=false;renderBuilder();}
 }
-function addUnit(id){const arr=state.musters[state.editor],t=E.BY_ID[id];if(!t||arr.length>=14||E.total(arr)+t.points>state.pointsLimit)return;arr.push(id);renderBuilder();}
+function addUnit(id){
+ const arr=state.musters[state.editor],t=E.BY_ID[id];
+ if(!t||arr.length>=14||E.total(arr)+t.points>state.pointsLimit)return;
+ const errors=E.musterProblems([...arr,id]);
+ if(errors.length){showSyncStatus('Roster limit reached',errors[0]);return;}
+ arr.push(id);renderBuilder();
+}
 function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);state.configEditor=null;renderBuilder();}
 function renderLab(){
  $('lab-muster-label').textContent=`Friendly ${E.total(state.musters.player)} pts / ${state.musters.player.length} units · Opposing ${E.total(state.musters.enemy)} pts / ${state.musters.enemy.length} units`;

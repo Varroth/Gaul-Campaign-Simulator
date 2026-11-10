@@ -20,3 +20,8 @@ This policy deliberately keeps importing a unit separate from certifying that th
 The first release has **zero fully Verified units**. This is intentional: the Alpha 0.5.2 engine still uses one representative ranged/melee weapon per unit and does not simulate every wargear option, attachment or faction rule. Until a complete unit mapping and the associated regression tests exist, a Sync badge is the accurate label.
 
 A reviewer must add a new ledger entry after the full checks and tests. Source changes or engine-version changes automatically downgrade the badge to **Synced** until a repeat review. Existing simulator profiles are not modified by this policy.
+
+
+## Alpha 0.7 restriction coverage
+
+Source-declared root selection limits, named character uniqueness, a shared Lost Cohort cap, selected per-five wargear quotas, and common weapon trait shortcuts are implemented with tests. This **does not** meet the complete verification criteria: modifier trees, every weapon profile/keyword, leader interactions, wound allocation and full detachment rules remain incomplete. Keep the Verified ledger empty.

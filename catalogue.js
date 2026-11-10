@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v5';
-const CACHE_VERSION=5;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v7';
+const CACHE_VERSION=7;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.6';
+const RULESET_VERSION='alpha-0.7';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -52,6 +52,30 @@ function parseWeapon(profile,mode){
 function pointsFrom(element){
  const costs=path(element,'costs','cost').filter(c=>/^(pts|points)$/i.test(value(c,'name')));
  return costs.length?int(value(costs[0],'value')):NaN;
+}
+function rosterMaximum(unit){
+ const limits=path(unit,'constraints','constraint').filter(c=>value(c,'type')==='max' && value(c,'field')==='selections' && value(c,'scope')==='roster').map(c=>int(value(c,'value'))).filter(n=>Number.isInteger(n)&&n>0);
+ return limits.length?Math.min(...limits):null;
+}
+// Only enforce quota expressions that correspond unambiguously to a weapon
+// family and a count. More complex source modifiers remain New Recruit-only.
+function wargearLimits(unit){
+ const p=descendants(unit,'profile').find(x=>/^Wargear \/ legal alternatives$/i.test(value(x,'name')));
+ const txt=field(p,'Description'); const out=[];
+ if(/one model per (?:full )?5 may (?:take|replace[^.]*with) (?:a )?power weapon/i.test(txt))
+  out.push({kind:'power',per:5,maximum:1,description:'One power weapon per five models'});
+ if(/for every full five models,? one Reaver may replace autopistol with a hand flamer/i.test(txt))
+  out.push({kind:'handflamer',per:5,maximum:1,description:'One hand flamer per five models'});
+ return out;
+}
+function enforceWargearLimits(base,modelCount,loadout){
+ for(const limit of base.wargearLimits||[]){
+  const limitCount=Math.floor(modelCount/limit.per)*limit.maximum;
+  const used=loadout.filter(w=>!w.isLeader&&(
+   limit.kind==='power'?/\bpower (?:sword|axe|fist|maul|blade|weapon)\b/i.test(w.name):
+   limit.kind==='handflamer'?/hand flamer/i.test(w.name):false)).reduce((total,w)=>total+w.count,0);
+  if(used>limitCount)throw Error(`${limit.description} (maximum ${limitCount} for this formation; selected ${used}).`);
+ }
 }
 function minModels(el){
  const c=path(el,'constraints','constraint').find(x=>value(x,'type')==='min'&&value(x,'field')==='selections');
@@ -242,6 +266,7 @@ function configureUnit(base,config={},leaders=[]){
    extra+=(selected.points||0)-(original.points||0);
   }
  }
+ enforceWargearLimits(base,form.models,weapons);
  const leader=config.leaderId?leaders.find(u=>u.id===config.leaderId):null;
  if(config.leaderId&&!isValidLeaderFor(base,leader))throw Error('This Leader is not eligible for the selected bodyguard.');
  if(leader)weapons.push(...(leader.loadout||[]).map(w=>({...w,count:Math.min(1,w.count),isLeader:true})));
@@ -266,7 +291,7 @@ function configureUnit(base,config={},leaders=[]){
 function fingerprint(unit){
  const snapshot={id:unit.id,sourceId:unit.sourceId,faction:unit.faction,name:unit.name,points:unit.points,
   estimated:unit.estimated,models:unit.models,wp:unit.wp,t:unit.t,save:unit.save,move:unit.move,oc:unit.oc,
-  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,leaderTargets:unit.leaderTargets,special:unit.special,category:unit.category,audit:unit.audit};
+  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,category:unit.category,audit:unit.audit};
  return hash(JSON.stringify(snapshot));
 }
 function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
@@ -290,6 +315,8 @@ function reviewNotes(unit){
   unit.loadout?.length?`Current default equipment: ${unit.loadout.slice(0,24).map(w=>`${w.count}× ${w.name} (${w.mode})`).join('; ')}${unit.loadout.length>24?'; additional profiles omitted':''}. Supported Infernal Warriors individual weapon choices are editable in your muster.`:'Weapon links in the default equipment could not be fully resolved.',
   unit.sizeOptions?.length?`Published size options: ${unit.sizeOptions.map(x=>`${x.label}${Number.isFinite(x.points)?' ('+x.points+' pts)':''}`).slice(0,14).join('; ')}. Eligible Infernal Warriors formations can be chosen in the muster editor.`:'No explicit size options were identified.',
   unit.special?.mandatoryChaplain?'Lost Cohort default cost includes its mandatory attached Chaplain; attachment and control tests remain unmodeled.':null,
+  Number.isInteger(unit.rosterMax)?`New Recruit roster limit: up to ${unit.rosterMax} copies of this datasheet per army.`:null,
+  unit.wargearLimits?.length?`Audited equipment quotas: ${unit.wargearLimits.map(x=>x.description).join('; ')}.`:null,
   statusFor(unit)==='verified'?'Full combat mapping reviewed and pinned to this catalogue revision.':'Wargear alternatives, restrictions and special rules have NOT been fully verified for the combat engine.'
  ].filter(Boolean);
 }
@@ -314,13 +341,14 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   const cat=categoryFor(node),stats=getStats(node,name,cat),models=isLeader?1:countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
   const vehicle=isArmouredVehicle(name,cat),daemon=/Khorne Allies|\bDAEMON\b/i.test(cat)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
-  const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
+  const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,painSensitive:true,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true,painSensitive:false}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
+  if(daemon)special.daemon=true;
   const profile=rootProfile(node);
   const fieldCoverage=['M','T','Sv','W','OC'].every(key=>!!field(profile,key));
   const sourceComposition=!!form?.selected?.models||!![...descendants(node,'description'),...descendants(node,'characteristic').filter(x=>value(x,'name')==='Description')].find(x=>/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d+)\s+attack bikes\b|\b10\s+Daemons\s+with\b/i.test(x.textContent||''));
   const declaredModels=sourceComposition||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
   const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
-   isLeader,leaderTargets:isLeader?leaderTargets(node):[],rootPoints:Number.isFinite(pointsFrom(node))?pointsFrom(node):0,
+   isLeader,leaderTargets:isLeader?leaderTargets(node):[],rosterMax:rosterMaximum(node),wargearLimits:faction==='IW'?wargearLimits(node):[],rootPoints:Number.isFinite(pointsFrom(node))?pointsFrom(node):0,
    defaultFormationId:form?.selected?.id||null,formationConfigs:configs,
    ranged:(()=>{const found=linked.weapons.filter(w=>w.mode==='ranged');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.ranged;})(),
    melee:(()=>{const found=linked.weapons.filter(w=>w.mode==='melee');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.melee;})(),
@@ -393,5 +421,5 @@ async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=
  const counts=Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]));
  return {ok:failed===0,changed,failed,counts,versionSource,cached:!!cached};
 }
-return {REPOSITORY,FILES,CACHE_KEY,RULESET_VERSION,VERIFIED_LEDGER,formation,sourceWeapons,configureUnit,isValidLeaderFor,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
+return {REPOSITORY,FILES,CACHE_KEY,RULESET_VERSION,VERIFIED_LEDGER,formation,sourceWeapons,configureUnit,isValidLeaderFor,rosterMaximum,wargearLimits,enforceWargearLimits,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
 });

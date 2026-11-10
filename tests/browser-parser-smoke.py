@@ -39,10 +39,10 @@ with sync_playwright() as p:
       </selectionEntries><sharedProfiles><profile id="hellblade" name="Hellblade" typeName="Weapon"><characteristics><characteristic name="Range">Melee</characteristic><characteristic name="A">3</characteristic><characteristic name="BS/WS">3+</characteristic><characteristic name="S">5</characteristic><characteristic name="AP">-1</characteristic><characteristic name="D">2</characteristic></characteristics></profile></sharedProfiles></catalogue>'''
     extra=page.evaluate('xml => GaulCatalogue.parseCatalogue(xml,"IW","source-sha").units',extras)
     letter=next(x for x in extra if x['name']=='Bloodletters')
-    assert letter['models']==10 and letter['points']==125 and letter['special']=={},letter
+    assert letter['models']==10 and letter['points']==125 and letter['special']=={'daemon':True},letter
     assert letter['loadout'][0]['count']==10,letter['loadout']
     bike=next(x for x in extra if x['name']=='Attack Bike Flanking Section')
-    assert bike['models']==2 and bike['points']==95 and bike['special']=={'fnp':5,'regen':1},bike
+    assert bike['models']==2 and bike['points']==95 and bike['special']=={'fnp':5,'regen':1,'painSensitive':True},bike
     lost=next(x for x in extra if x['name'].startswith('Lost Cohort'))
     assert lost['models']==10 and lost['points']==365 and lost['special'].get('mandatoryChaplain') is True,lost
     print('UNUSUAL COMPOSITIONS OK: 2 attack bikes, 10 daemons without serum, 10 Lost Cohort afflicted')

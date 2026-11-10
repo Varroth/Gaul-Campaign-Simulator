@@ -37,3 +37,5 @@ jobs:
         run: python scripts/audit_upstream.py upstream
       - name: Audit Infernal Warriors default formations and weapons
         run: python scripts/audit_infernal.py upstream/Infernal_Warriors.cat
+      - name: Check published Infernal Warriors roster caps and quota wording
+        run: python scripts/audit_roster_rules.py upstream/Infernal_Warriors.cat
