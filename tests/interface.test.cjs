@@ -20,3 +20,12 @@ test('three objectives and combat log render',()=>{const {elems}=fakePage();asse
 test('battle can advance through phases',()=>{const {elems,handlers}=fakePage();handlers['next-phase:click']();assert.equal(elems.scoreboard.innerHTML.includes('Shooting'),true);handlers['next-phase:click']();assert.equal(elems.scoreboard.innerHTML.includes('Charge'),true);});
 test('army catalogue renders all factions',()=>{const {elems,handlers}=fakePage();handlers['tab-builder:click']();assert.ok(elems['unit-catalogue'].innerHTML.includes('Balan Bannon'));assert.ok(elems['unit-catalogue'].innerHTML.includes('High Stormseer'));});
 test('battle lab generates ten results and chart',()=>{const {elems,handlers}=fakePage();handlers['tab-lab:click']();handlers['run-lab:click']();assert.ok(elems['lab-results'].innerHTML.includes('Win distribution'));assert.equal((elems['lab-results'].innerHTML.match(/<tr>/g)||[]).length,11);});
+
+test('builder shows all three profile confidence labels and a status filter',()=>{
+ const {elems,handlers}=fakePage();
+ handlers['tab-builder:click']();
+ assert.ok(elems['unit-catalogue'].innerHTML.includes('SIM ESTIMATE'));
+ assert.match(elems['verification-counts'].textContent,/0 Verified · 0 Synced/);
+ handlers['status-filter:change']({target:{value:'verified'}});
+ assert.match(elems['unit-catalogue'].innerHTML,/No units are fully Verified yet/);
+});

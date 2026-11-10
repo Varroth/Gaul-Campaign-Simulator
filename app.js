@@ -10,8 +10,12 @@ const $=id=>document.getElementById(id);
 const html=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const copy=a=>[...a];
 const initialPlayer=copy(E.DEFAULT_PLAYER),initialEnemy=copy(E.DEFAULT_ENEMY);
-const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},selected:null,editor:'player',filter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
+const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},selected:null,editor:'player',filter:'ALL',tierFilter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
 const factionName=t=>E.FACTIONS[t.faction]?.name||'Unknown';
+const tier=t=>LIVE?.statusFor(t)||'sim-estimate';
+const tierLabel=t=>({'verified':'VERIFIED','synced':'SYNCED','sim-estimate':'SIM ESTIMATE'})[tier(t)];
+function tierTag(t){return `<span class="live-source-tag ${tier(t)}" title="${html(tier(t)==='verified'?'Fully reviewed against the pinned source revision':tier(t)==='synced'?'New Recruit entry; full combat rules not yet verified':'Simulator-only playtest profile')}">${tierLabel(t)}</span>${t.source==='linked'&&t.estimated?'<span class="points-estimate" title="Source points could not be resolved; value is a simulator estimate">EST. POINTS</span>':t.source==='linked'&&t.audit?.points==='per-model'?'<span class="points-estimate" title="Points extrapolated from model costs; roster modifiers may change the total">CALC. POINTS</span>':''}`;}
+function profileNotes(t){return LIVE?.reviewNotes(t)||['Built-in simulator-only playtest profile.'];}
 const isPlayer=u=>u&&u.side==='player';
 const tFor=u=>E.template(u);
 function tab(name){
@@ -64,7 +68,7 @@ function renderInspector(){
  <div class="stat-row"><div class="stat"><b>${t.t}</b><small>T</small></div><div class="stat"><b>${t.save}+</b><small>Sv</small></div><div class="stat"><b>${t.move}</b><small>Move</small></div><div class="stat"><b>${t.oc}</b><small>OC/model</small></div></div>
  <div class="attack-line"><strong>Ranged</strong> · ${t.ranged.attacks}A × model · R${t.ranged.range} · S${t.ranged.s} · AP−${t.ranged.ap} · D${t.ranged.damage} · ${t.ranged.skill}+</div>
  <div class="attack-line"><strong>Melee</strong> · ${t.melee.attacks}A × model · S${t.melee.s} · AP−${t.melee.ap} · D${t.melee.damage} · ${t.melee.skill}+</div>
- <p class="profile-note">${html(t.description)}</p><p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
+ <p class="profile-note">${tierTag(t)} ${html(t.description)}</p><p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
 }
 function renderObjectives(){
  const g=state.game;
@@ -111,20 +115,26 @@ function resetBattle(){
 function renderBuilder(){
  const side=state.editor,points=E.total(state.musters[side]),linkedFactions=new Set(Object.entries(state.linkedCounts).filter(([,n])=>n>0).map(([f])=>f));
  const needle=state.search.toLowerCase().trim();
- const list=E.TEMPLATES.filter(t=>{
+ const available=E.TEMPLATES.filter(t=>{
   if(t.source==='linked'&&t.visible===false)return false;
   if(t.source!=='linked'&&linkedFactions.has(t.faction))return false;
-  if(state.filter!=='ALL'&&t.faction!==state.filter)return false;
-  return !needle||(`${t.name} ${t.category||''} ${factionName(t)}`).toLowerCase().includes(needle);
- }).sort((a,b)=>a.faction.localeCompare(b.faction)||a.name.localeCompare(b.name));
- $('builder-side').value=side;$('faction-filter').value=state.filter;$('points-limit').value=String(state.pointsLimit);
+  return state.filter==='ALL'||t.faction===state.filter;
+ });
+ const counts={'verified':0,'synced':0,'sim-estimate':0};
+ for(const t of available)counts[tier(t)]++;
+ const list=available.filter(t=>(state.tierFilter==='ALL'||tier(t)===state.tierFilter)&&
+  (!needle||(`${t.name} ${t.category||''} ${factionName(t)}`).toLowerCase().includes(needle)))
+  .sort((a,b)=>a.faction.localeCompare(b.faction)||a.name.localeCompare(b.name));
+ $('builder-side').value=side;$('faction-filter').value=state.filter;$('status-filter').value=state.tierFilter;$('points-limit').value=String(state.pointsLimit);
  if($('unit-search').value!==state.search)$('unit-search').value=state.search;
- $('catalogue-count').textContent=`(${list.length} available${needle?' · filtered':''})`;
- $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span>${t.source==='linked'?` <span class="live-source-tag ${t.estimated?'estimate':''}">${t.estimated?'SIM ESTIMATE':'NEW RECRUIT'}</span>`:''}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):'<p class="muted">No matching units. Change the faction filter or search terms.</p>';
+ $('verification-counts').textContent=`${counts.verified} Verified · ${counts.synced} Synced · ${counts['sim-estimate']} Sim Estimate`;
+ $('catalogue-count').textContent=`(${list.length} available${needle||state.tierFilter!=='ALL'?' · filtered':''})`;
+ $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span> ${tierTag(t)}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p><details class="unit-audit"><summary>Verification details</summary><ul>${profileNotes(t).map(note=>`<li>${html(note)}</li>`).join('')}</ul></details></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):
+ state.tierFilter==='verified'?'<p class="muted">No units are fully Verified yet. Use Synced to play with imported profiles while we audit their weapons, points, abilities and restrictions.</p>':'<p class="muted">No matching units. Change the faction, verification filter or search terms.</p>';
  $('muster-list').innerHTML=['player','enemy'].map(s=>{
   const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
   return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
- ${state.musters[s].length?state.musters[s].map((id,i)=>`<div class="muster-row"><span>${html(E.BY_ID[id]?.name||'Unavailable datasheet')} <span class="point-small">${E.BY_ID[id]?.points??'?'}${E.BY_ID[id]?.estimated?'*':''}</span></span><button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(E.BY_ID[id]?.name||'unit')}">×</button></div>`).join(''):'<p class="muted">No units selected.</p>'}</div>`;
+ ${state.musters[s].length?state.musters[s].map((id,i)=>`<div class="muster-row"><span>${html(E.BY_ID[id]?.name||'Unavailable datasheet')} <span class="point-small">${E.BY_ID[id]?.points??'?'}${E.BY_ID[id]?.estimated?'*':''}</span> ${E.BY_ID[id]?tierTag(E.BY_ID[id]):''}</span><button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(E.BY_ID[id]?.name||'unit')}">×</button></div>`).join(''):'<p class="muted">No units selected.</p>'}</div>`;
  }).join('');
  $('apply-musters').disabled=!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit);
 }
@@ -193,6 +203,7 @@ function bind(){
  $('import-file').addEventListener('change',async ev=>{const file=ev.target.files?.[0];if(!file)return;try{if(file.size>500000)throw Error('Save file is unexpectedly large.');importData(JSON.parse(await file.text()));}catch(e){message(e.message,true);renderBattle();}ev.target.value='';});
  $('builder-side').addEventListener('change',ev=>{state.editor=ev.target.value;renderBuilder();});
  $('faction-filter').addEventListener('change',ev=>{state.filter=ev.target.value;renderBuilder();});
+ $('status-filter').addEventListener('change',ev=>{state.tierFilter=ev.target.value;renderBuilder();});
  $('points-limit').addEventListener('change',ev=>{state.pointsLimit=Number(ev.target.value);renderBuilder();});
  $('unit-search').addEventListener('input',ev=>{state.search=ev.target.value;renderBuilder();});
  $('refresh-catalogues').addEventListener('click',()=>syncCatalogues(true));

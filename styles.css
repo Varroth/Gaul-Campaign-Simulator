@@ -17,3 +17,20 @@
 .live-source-tag.estimate{color:#e3c08b;border-color:#755d3e}
 .live-count{font-size:11px;color:#bbd0d4;margin:2px 0}
 @media(max-width:720px){.catalogue-bridge{display:block}.catalogue-bridge button{margin-top:12px;width:100%}}
+
+/* Auditable profile-confidence display, independent from points provenance. */
+.builder-controls{grid-template-columns:repeat(4,minmax(0,1fr))}
+.live-source-tag.verified{color:#b7e7c4;border-color:#53815f;background:#173425}
+.live-source-tag.synced{color:#b7d4ed;border-color:#4a7188;background:#182a36}
+.live-source-tag.sim-estimate{color:#e3c08b;border-color:#755d3e;background:#322719}
+.points-estimate{display:inline-block;margin-left:3px;padding:2px 5px;border:1px solid #9d6439;border-radius:4px;color:#f4be91;font-size:9px;white-space:nowrap;font-weight:750}
+.verification-legend{border:1px solid #394a51;border-radius:8px;padding:12px 14px;margin:0 0 16px;background:#172229;color:#cad3d9;font-size:12px}
+.verification-legend strong{margin-right:8px;color:#e0e7eb}
+.verification-legend span{color:#b8cfda}
+.verification-legend p{font-size:11px;line-height:1.55;color:#9caeba;margin:6px 0 0}
+.unit-audit{margin-top:6px;color:#acb8c1;font-size:11px}
+.unit-audit summary{cursor:pointer;width:max-content;max-width:100%;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;color:#b6c9d6}
+.unit-audit ul{margin:8px 0 0 17px;padding:0;line-height:1.65}
+.muster-row .live-source-tag{margin-left:4px}
+@media(max-width:1100px){.builder-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.builder-controls{grid-template-columns:1fr}.builder-controls label:last-child{grid-column:auto}}

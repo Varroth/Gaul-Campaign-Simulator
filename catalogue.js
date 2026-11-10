@@ -16,6 +16,13 @@ const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
 const MAX_CACHE_AGE=45*24*3600*1000;
 const MAX_TEMPLATES=600;
+// A VERIFIED badge is only issued for an explicitly reviewed, revision-pinned combat
+// mapping. No imported unit is automatically considered verified. Entries are added
+// to this ledger only after full profile, loadout, rule, composition and engine tests.
+// The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
+const RULESET_VERSION='alpha-0.4';
+const VERIFIED_LEDGER=Object.freeze({});
+const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
 const childElements=(el)=>Array.from(el?.childNodes||[]).filter(n=>n.nodeType===1);
 const children=(el,name)=>childElements(el).filter(n=>n.localName===name);
@@ -92,13 +99,13 @@ function getStats(unit,name,category){
 }
 function getPoints(unit,modelCount,stats){
  const explicit=pointsFrom(unit);
- if(Number.isFinite(explicit)&&explicit>0)return {points:bounded(Math.round(explicit),1,3000,120),estimated:false};
+ if(Number.isFinite(explicit)&&explicit>0)return {points:bounded(Math.round(explicit),1,3000,120),estimated:false,basis:'direct'};
  // Some catalogue entries charge by model, not at the parent unit entry.
  const model=descendants(unit,'selectionEntry').find(e=>value(e,'type')==='model'&&pointsFrom(e)>0);
  const perModel=model?pointsFrom(model):NaN;
- if(Number.isFinite(perModel)&&perModel>0)return {points:bounded(Math.round(perModel*modelCount),1,3000,120),estimated:false};
+ if(Number.isFinite(perModel)&&perModel>0)return {points:bounded(Math.round(perModel*modelCount),1,3000,120),estimated:false,basis:'per-model'};
  // This is explicitly a game-only placeholder, never presented as New Recruit points.
- return {points:bounded(Math.round(modelCount*stats.wp*(stats.t>=8?18:stats.save<=2?17:12)),25,650,120),estimated:true};
+ return {points:bounded(Math.round(modelCount*stats.wp*(stats.t>=8?18:stats.save<=2?17:12)),25,650,120),estimated:true,basis:'estimate'};
 }
 function getWeapons(unit,stats){
  const profiles=descendants(unit,'profile').filter(p=>value(p,'typeName')==='Weapon');
@@ -109,10 +116,40 @@ function getWeapons(unit,stats){
   if(ranged&&melee)break;
  }
  return {ranged:ranged||{attacks:stats.t>=8?3:2,range:5,s:stats.t>=8?8:4,ap:0,damage:1,skill:3},
-  melee:melee||{attacks:stats.t>=8?3:2,range:1,s:stats.t>=8?8:4,ap:0,damage:1,skill:3}};
+  melee:melee||{attacks:stats.t>=8?3:2,range:1,s:stats.t>=8?8:4,ap:0,damage:1,skill:3},
+  rangedFromSource:!!ranged,meleeFromSource:!!melee};
 }
 function categoryFor(unit){const links=path(unit,'categoryLinks','categoryLink');return links.map(x=>value(x,'name')).filter(Boolean).slice(0,3).join(', ');}
-function parseCatalogue(xml,faction){
+// Hashing is used to spot drift in reviewed mappings. Git's full blob SHA,
+// not this lightweight fingerprint, is the authoritative source revision pin.
+function fingerprint(unit){
+ const snapshot={id:unit.id,sourceId:unit.sourceId,faction:unit.faction,name:unit.name,points:unit.points,
+  estimated:unit.estimated,models:unit.models,wp:unit.wp,t:unit.t,save:unit.save,move:unit.move,oc:unit.oc,
+  ranged:unit.ranged,melee:unit.melee,special:unit.special,category:unit.category,audit:unit.audit};
+ return hash(JSON.stringify(snapshot));
+}
+function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
+ if(!unit||unit.source!=='linked')return 'sim-estimate';
+ const approval=ledger[unit.id];
+ if(!approval||!sourceVersion||approval.catalogueSha!==sourceVersion||approval.sourceId!==unit.sourceId||
+    approval.rulesetVersion!==RULESET_VERSION||approval.fingerprint!==fingerprint(unit)||
+    typeof approval.reviewer!=='string'||!approval.reviewer.trim()||!approval.reviewedAt||
+    !REVIEW_CHECKS.every(k=>approval.checks?.[k]===true))return 'synced';
+ return 'verified';
+}
+function reviewNotes(unit){
+ if(!unit||unit.source!=='linked')return ['Built-in, simulator-only playtest profile; not imported from New Recruit.'];
+ const a=unit.audit||{};
+ const points=a.points==='direct'?'Points read from the unit entry.':a.points==='per-model'?'Points extrapolated from a model entry; roster modifiers may change them.':'Points are a simulator estimate, not a published roster cost.';
+ return [points,
+  a.unitStats==='source'?'Unit characteristics read from the linked profile; movement is converted to grid squares.':'Some characteristics use simulator defaults.',
+  a.modelCount==='declared'?'Starting model count inferred from explicit minimum selections.':'Starting model count is a simulator approximation.',
+  a.ranged==='source'?'A ranged weapon profile was found; one representative profile is used.':'Ranged attacks use a simulator fallback.',
+  a.melee==='source'?'A melee weapon profile was found; one representative profile is used.':'Melee attacks use a simulator fallback.',
+  statusFor(unit)==='verified'?'Full combat mapping reviewed and pinned to this catalogue revision.':'Wargear alternatives, restrictions and special rules have NOT been fully verified for the combat engine.'
+ ];
+}
+function parseCatalogue(xml,faction,sourceVersion=''){
  if(!(faction in FILES))throw Error('Unknown catalogue faction.');
  if(typeof DOMParser==='undefined')throw Error('This browser does not support XML parsing.');
  const doc=new DOMParser().parseFromString(xml,'application/xml');
@@ -125,9 +162,15 @@ function parseCatalogue(xml,faction){
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
   const vehicle=isArmouredVehicle(name,cat),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
   const special=faction==='IW'&&!vehicle&&!mortal?{fnp:5,regen:1}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
-  result.push({id,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
+  const profile=rootProfile(node);
+  const fieldCoverage=['M','T','Sv','W','OC'].every(key=>!!field(profile,key));
+  const declaredModels=descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
+  const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
    ranged:weapons.ranged,melee:weapons.melee,special,source:'linked',revision,estimated:p.estimated,category:cat,
-   description:`New Recruit ${cat||'datasheet'} · simplified battle rules${p.estimated?' · simulator point estimate':''}.`});
+   audit:{points:p.basis,unitStats:fieldCoverage?'source':'fallback',modelCount:declaredModels?'declared':'inferred',ranged:weapons.rangedFromSource?'source':'fallback',melee:weapons.meleeFromSource?'source':'fallback'},
+   description:`New Recruit ${cat||'datasheet'} · simplified battle rules${p.estimated?' · simulator point estimate':''}.`};
+  unit.verification=statusFor(unit,sourceVersion);
+  result.push(unit);
  }
  if(result.length>MAX_TEMPLATES)throw Error('Catalogue contains unexpectedly many units.');
  return {faction,revision,units:result};
@@ -139,7 +182,12 @@ function readCache(storage){
   if(!data.catalogues||typeof data.catalogues!=='object')return null;
   for(const [f,x] of Object.entries(data.catalogues)){
    if(!(f in FILES)||!Array.isArray(x.units)||x.units.length>MAX_TEMPLATES)return null;
-   for(const u of x.units)if(u.faction!==f||typeof u.name!=='string'||!u.id?.startsWith('nr-')||!Number.isFinite(u.points)||u.points<1)return null;
+   for(const u of x.units){
+    if(u.faction!==f||typeof u.name!=='string'||!u.id?.startsWith('nr-')||!Number.isFinite(u.points)||u.points<1)return null;
+    // The local cache is untrusted and a source update may invalidate prior verification.
+    // Always derive the status from the pinned review ledger, never trust a cached badge.
+    u.source='linked';u.sourceVersion=x.version;u.verification=statusFor(u,x.version);
+   }
   }
   return data;
  }catch(e){return null;}
@@ -175,7 +223,7 @@ async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=
   onStatus({type:'loading',faction:f,message:`Loading ${f} from New Recruit…`});
   try{
    const xml=await fetchText(RAW+file+'?v='+encodeURIComponent(versions[f]),request);
-   const parsed=parseCatalogue(xml,f);
+   const parsed=parseCatalogue(xml,f,versions[f]);
    if(!parsed.units.length&&f!=='ST')throw Error('No playable root units were found.');
    data.catalogues[f]={version:versions[f],revision:parsed.revision,units:parsed.units};
    data.cachedAt=Date.now();writeCache(data,storage);
@@ -186,5 +234,5 @@ async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=
  const counts=Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]));
  return {ok:failed===0,changed,failed,counts,versionSource,cached:!!cached};
 }
-return {REPOSITORY,FILES,CACHE_KEY,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
+return {REPOSITORY,FILES,CACHE_KEY,RULESET_VERSION,VERIFIED_LEDGER,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
 });

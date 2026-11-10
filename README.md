@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.3 (Live New Recruit Bridge)
+# Gaul Campaign Simulator — Alpha 0.4 (Verified / Synced / Sim Estimate)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -7,6 +7,15 @@ An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. 
 Once GitHub Pages is enabled, the game is at **https://varroth.github.io/Gaul-Campaign-Simulator/**. Open **Army Builder** to search units or filter by faction. Click **Sync latest units** at any time; the page also checks the source repository on load and periodically when an inactive tab is revisited.
 
 No user login or GitHub token is needed. The browser fetches public catalogue `.cat` XML files read-only and uses the GitHub tree's file checksums to avoid redundant downloads. Basic catalogue entries are cached on your device. If GitHub is unavailable, cached data (if present) or the built-in illustrative units remain available.
+
+## Confidence labels
+
+- **Verified:** Source entry and the simulator combat mapping have been manually reviewed, with all required checks, a source Git blob SHA and a profile fingerprint pinned in the verification ledger. Automatically becomes **Synced** if the source revision changes. This initial release intentionally awards no Verified badges until complete reviews are performed.
+- **Synced:** A unit imported from the New Recruit repository. Its name and some fields come from the XML, while model counts, weapon selection, points and abilities can still be approximations.
+- **Sim Estimate:** A manually maintained simulator-only profile, not a linked New Recruit unit.
+- **Est. points:** The imported XML did not contain an interpretable base cost, so the simulator generated one. **Calc. points:** A cost was extrapolated from model entries; roster modifiers may change it. Both warnings are independent of verification level.
+
+Use the **Profile status** filter and expand **Verification details** on each unit to see why it is not yet Verified. See [verification policy](docs/VERIFICATION_POLICY.md).
 
 ## What syncs automatically
 
