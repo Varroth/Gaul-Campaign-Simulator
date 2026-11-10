@@ -39,3 +39,5 @@ jobs:
         run: python scripts/audit_infernal.py upstream/Infernal_Warriors.cat
       - name: Check published Infernal Warriors roster caps and quota wording
         run: python scripts/audit_roster_rules.py upstream/Infernal_Warriors.cat
+      - name: Audit named Infernal Warriors source abilities and combat coverage
+        run: python scripts/audit_abilities.py upstream/Infernal_Warriors.cat

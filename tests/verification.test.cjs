@@ -32,7 +32,7 @@ test('source version pin is mandatory for a Verified status',()=>assert.equal(C.
 test('ledger is intentionally empty until full combat rules have been reviewed',()=>assert.deepEqual(Object.keys(C.VERIFIED_LEDGER),[]));
 
 test('cached data cannot forge Verified profile status',()=>{
- const storage={getItem:()=>JSON.stringify({v:7,cachedAt:Date.now(),catalogues:{IW:{version:'catalogue-blob-a1',units:[{...linked,verification:'verified'}]}}}),setItem:()=>{}};
+ const storage={getItem:()=>JSON.stringify({v:C.CACHE_VERSION,cachedAt:Date.now(),catalogues:{IW:{version:'catalogue-blob-a1',units:[{...linked,verification:'verified'}]}}}),setItem:()=>{}};
  const loaded=C.readCache(storage);
  assert.equal(loaded.catalogues.IW.units[0].verification,'synced');
 });

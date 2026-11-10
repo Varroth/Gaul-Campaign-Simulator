@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.7 (Infernal Warriors roster rules and weapon effects)
+# Gaul Campaign Simulator — Alpha 0.8 (Infernal Warriors control, abilities, and combat integration)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -58,6 +58,17 @@ Gaul Campaign Simulator is an independent non-commercial fan project, **not affi
 
 See [Configurable Musters](docs/CONFIGURABLE_MUSTERS.md) for details of the editable squad-size, per-model wargear and Leader options, save-file source pinning, and the limitations that prevent a **Verified** combat badge. The original Gaul Campaign: Renegades catalogues remain untouched.
 
-## Alpha 0.7 audit scope
+## Alpha 0.8 audit scope
 
 See [Source roster rules and combat effects](docs/ROSTER_RULES_V7.md). **0 units are marked Verified**: the added checks address some of the biggest fidelity gaps, but full source-to-engine mapping still requires unit-specific review. GitHub Actions checks current source restrictions through `scripts/audit_roster_rules.py`.
+
+## Alpha 0.8 — Source-linked combat additions
+
+- Bundled Chaplain is modeled as an **individual paid-in-formation combat model** for both Lost Cohort armour variants. Points are not charged twice. Precision attacks can remove the Chaplain before the rest of the squad; subsequent Command-phase 4+ Control Tests, nearby replacement Chaplain supervision (12 inches ≈ six cells), forced nearest-enemy pursuit, retained OC and one afflicted melee Attack bonus are supported. Optional first-round Deep Strike and Reserves checks are still **not implemented**.
+- Named characters: Varroth's first fatal-wound survival, Bannon's once-per-battle charge Battle-shock effect, both Chaplain Battle-shock rerolls and replacement supervision, and limited Bannon/Directed Objective Hit/Wound rerolls. Line of sight, Voxmaster range and complete detachment triggers remain approximated.
+- Individual named unit abilities now trigger selected one-die hit/wound/save rerolls, one-use damage reduction, charge-die rerolls, and advance modifiers where the combat engine supports the necessary conditions. **These are playtest translations**, not wholesale verification of every XML rule.
+- Player can use **Advance** from the unit inspector in the Movement phase. Dice are rolled and stored once; extra grid movement, Assault-only shooting, and prohibition on charging are enforced. The simulator uses a two-inch-square abstraction.
+- Source-backed 25% Khorne daemon ally points cap, roster maximums, shared Lost Cohort limit, named Leader uniqueness and previously audited per-five weapon quotas are enforced.
+- Ability descriptions display **Modeled / Reference only** in the inspector. This is separate from the overall **Synced / Verified / Sim Estimate** labels. No unit is fully Verified yet.
+
+**Still missing or abstracted:** transport embark/disembark and capacity, Reserves and turn-one Cohort Insertion, aircraft/hover movement, deployment, exact line of sight/terrain, mortal wound interactions and all stratagems/detachment modifiers, every conditional wargear and multi-entry selection graph, and full source-to-simulation validation for all 74 units. Do not use Battle Lab results as proof of tournament balance or exact points/rules fidelity. See [coverage notes](docs/COMBAT_COVERAGE_V8.md).

@@ -52,7 +52,7 @@ with sync_playwright() as p:
  assert sum(w['activeCount']*w['attacks'] for w in result['after'])==2,result['after']
  assert len(result['g']['units'])==2
  # Exercise UI via offline cached catalogues, then change formation, gear and leader.
- page.evaluate('data=>{const memory={};Object.defineProperty(window,"localStorage",{configurable:true,value:{getItem:k=>memory[k]||null,setItem:(k,v)=>memory[k]=v}});window.localStorage.setItem(GaulCatalogue.CACHE_KEY,JSON.stringify({v:5,cachedAt:Date.now(),catalogues:{IW:{version:"fixture-sha",revision:"99",units:data}}}));}',data['units'])
+ page.evaluate('data=>{const memory={};Object.defineProperty(window,"localStorage",{configurable:true,value:{getItem:k=>memory[k]||null,setItem:(k,v)=>memory[k]=v}});window.localStorage.setItem(GaulCatalogue.CACHE_KEY,JSON.stringify({v:GaulCatalogue.CACHE_VERSION,cachedAt:Date.now(),catalogues:{IW:{version:"fixture-sha",revision:"99",units:data}}}));}',data['units'])
  page.add_script_tag(content=(root/'app.js').read_text())
  page.locator('[data-tab="builder"]').click()
  page.locator('#faction-filter').select_option('IW')

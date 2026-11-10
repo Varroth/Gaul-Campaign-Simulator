@@ -69,6 +69,14 @@ function renderInspector(){
  <div class="attack-line"><strong>Ranged</strong> · ${t.ranged.attacks}A × model · R${t.ranged.range} · S${t.ranged.s} · AP−${t.ranged.ap} · D${t.ranged.damage} · ${t.ranged.skill}+</div>
  <div class="attack-line"><strong>Melee</strong> · ${t.melee.attacks}A × model · S${t.melee.s} · AP−${t.melee.ap} · D${t.melee.damage} · ${t.melee.skill}+</div>
  ${t.loadout?.length?`<details class="unit-audit"><summary>New Recruit default weapons (${t.loadout.length} types)</summary><ul>${t.loadout.slice(0,30).map(w=>`<li>${w.count}× ${html(w.name)} · ${html(w.mode)} · A${w.attacks} / S${w.s} / AP−${w.ap} / D${w.damage}${w.traits?` · ${html(w.traits)}`:''}</li>`).join('')}</ul></details>`:''}
+ ${t.leader?`<p class="muted">Attached ${html(t.leader.name)}: ${u.leaderAlive!==false?`${Math.max(0,t.leader.wp-(u.leaderInjury||0))} / ${t.leader.wp} W remaining`:'destroyed'}${t.leader.bundled?' · points already included in formation':''}</p>`:''}
+ ${t.special?.lost&&t.special?.mandatoryChaplain?`<p class="muster-rule-warning">Lost Cohort control: ${html(u.control||'controlled')}${u.leaderAlive===false?' · original Chaplain lost':''}. Objective Control retained unless Battle-shocked.</p>`:''}
+ ${u.battleshocked?'<p class="muster-rule-warning">Battle-shocked: 0 Objective Control until next Command phase.</p>':''}
+ ${u.side==='player'&&state.game.phase==='movement'&&!u.moved&&!u.advancing?`<button type="button" class="tiny-button" data-advance-unit="${html(u.uid)}">Advance (roll D6, restrict shooting/charge)</button>`:''}
+ ${u.advancing?`<p class="muted">Advanced +${u.advanceRoll} inches this turn: only Assault weapons may shoot; cannot charge.</p>`:''}
+ ${t.abilities?.length?`<details class="unit-audit"><summary>Source abilities &amp; combat coverage</summary><ul>${t.abilities.filter(a=>!/^ROSTER CARD/.test(a.name)).slice(0,30).map(a=>`<li><strong>${a.coverage==='modeled'?'Modeled':a.coverage==='partial'?'Partial':'Reference only'}</strong> — ${html(a.name)}: ${html(a.description.slice(0,360))}</li>`).join('')}</ul></details>`:''}
+ ${u.side==='enemy'&&state.game.active==='player'&&state.game.phase==='movement'&&state.game.directed?.player!==u.uid?`<button type="button" class="tiny-button" data-direct-target="${html(u.uid)}">Mark as Directed Objective</button>`:''}
+ ${state.game.directed?.player===u.uid?'<p class="muted">★ Directed Objective designated for friendly Infernal Warriors.</p>':''}
  <p class="profile-note">${tierTag(t)} ${html(t.description)}</p>${u.painPenalty?'<p class="muster-rule-warning">Warp-Aggravated Pain: −1 ranged Hit until your next Command phase.</p>':''}<p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
 }
 function renderObjectives(){
@@ -127,7 +135,7 @@ function showConfig(side,index){
  ${select('Squad size','formation',null,base.formationConfigs.map(f=>({...f,label:`${f.label}`})),form.id)}
  <div class="gear-editor">${form.slots.map(slot=>select(slot.name,'gear',slot.id,slot.choices,gear[slot.id]||slot.selectedId)).join('')}</div>
  ${!base.special?.mandatoryChaplain&&leaderOptions.length?select('Attached Leader (paid once)','leader',null,[{id:'',label:'None',points:0},...leaderOptions.map(x=>({...x,label:x.name}))],t.leaderId||''):''}
- ${base.special?.mandatoryChaplain?'<p class="muted">This Lost Cohort formation already includes its mandatory Chaplain cost; no duplicate Leader is added.</p>':''}
+ ${base.special?.mandatoryChaplain?'<p class="muted">This Lost Cohort formation already includes its mandatory Chaplain cost; its Chaplain has independent wounds and can be targeted by Precision weapons. No duplicate Leader is added.</p>':''}
  <p class="muted">The attached Leader acts within this squad on the battlefield (simplified last-survivor and wounds rules).</p></div>`;
 }
 function updateConfiguration(side,index,kind,selected,slotId){
@@ -267,6 +275,16 @@ function bind(){
  $('unit-search').addEventListener('input',ev=>{state.search=ev.target.value;renderBuilder();});
  $('refresh-catalogues').addEventListener('click',()=>syncCatalogues(true));
  $('unit-catalogue').addEventListener('click',ev=>{const b=ev.target.closest('[data-add]');if(b)addUnit(b.dataset.add);});
+ $('selected-unit').addEventListener('click',ev=>{
+  const advancing=ev.target.closest('[data-advance-unit]');if(advancing){
+   const result=E.beginAdvance(state.game,advancing.dataset.advanceUnit);
+   message(result.ok?`Advance roll: ${result.roll}. Select a destination square.`:result.message,!result.ok);
+   renderBattle();return;
+  }
+  const btn=ev.target.closest('[data-direct-target]');if(!btn)return;
+  const result=E.declareDirectedObjective(state.game,'player',btn.dataset.directTarget);
+  message(result.ok?'Directed Objective designated.':result.message,!result.ok);renderBattle();
+ });
  $('muster-list').addEventListener('click',ev=>{
   const remove=ev.target.closest('[data-remove-side]');if(remove){removeUnit(remove.dataset.removeSide,Number(remove.dataset.removeIndex));return;}
   const edit=ev.target.closest('[data-edit-side]');if(edit){const key=edit.dataset.editSide+':'+edit.dataset.editIndex;state.configEditor=state.configEditor===key?null:key;renderBuilder();}
