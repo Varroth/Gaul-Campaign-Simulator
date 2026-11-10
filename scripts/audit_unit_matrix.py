@@ -84,7 +84,7 @@ def analyze(unit,index):
     if selectable:blockers.append('Equipment and selection legality incomplete')
     if modifiers or conditions:blockers.append('Conditional modifiers and points need audit')
     if unresolved:blockers.append('Some referenced profiles unresolved in source')
-    if variable:blockers.append('Variable attacks and damage need exact resolution')
+    if variable:blockers.append('Variable weapon profiles still need unit-specific parity tests')
     if abilities:blockers.append('Named abilities require condition-specific tests')
     blockers.append('Shared engine lacks complete edition-specific mechanics')
     return {'sourceId':unit.get('id'),'name':name,'default':default,

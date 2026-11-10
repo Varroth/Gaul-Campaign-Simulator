@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.8.1 (Infernal Warriors per-unit source-audit)
+# Gaul Campaign Simulator — Alpha 0.8.2 (74-unit audit and variable weapon dice)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -78,3 +78,7 @@ See [Source roster rules and combat effects](docs/ROSTER_RULES_V7.md). **0 units
 The Army Builder's Verification details show per-unit blockers for alternative formations, wargear legality, conditional modifiers and partially modeled abilities. They do not promote any incomplete unit to Verified.
 
 The simulator CI workflow checks out the current New Recruit source read-only and produces a 74-unit JSON and Markdown audit, pinned to the XML Git blob SHA. Download the artifact from [Simulator Regression Tests](https://github.com/Varroth/Gaul-Campaign-Simulator/actions/workflows/simulator-tests.yml).
+
+## Alpha 0.8.2 results
+
+A full source-structure pass now audits all 74 Infernal Warriors root datasheets and 22 Leader-type character entries, reporting individual blockers as a downloadable GitHub Actions artifact. The combat engine also resolves the source's common variable attack and damage dice expressions (D3, D6, 2D6 and D6+N) and checks wall obstruction for ranged attacks. This is **partial implementation**, not full rules parity: no units are promoted to Verified. The parsed catalogue cache version is bumped so previously synced units are rebuilt with the new audit blockers after a successful refresh.
