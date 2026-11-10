@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#11151a">
+<meta name="description" content="Gaul Campaign: Renegades — an independent tabletop-inspired tactical battle simulator and balance laboratory.">
+<title>Gaul Campaign | Battle Simulator</title>
+<link rel="stylesheet" href="styles.css">
+<script defer src="engine.js"></script>
+<script defer src="app.js"></script>
+</head>
+<body>
+<header class="site-header">
+ <div class="brand"><div class="brand-mark" aria-hidden="true">G<span>C</span></div><div><p class="eyebrow">GAUL CAMPAIGN: RENEGADES</p><h1>Battle Simulator <span class="edition">ALPHA 0.2</span></h1></div></div>
+ <div class="header-actions"><span class="live-indicator"><span class="status-dot"></span> Local playtest</span><a class="quiet-link" href="https://github.com/Varroth/Gaul-Campaign-Simulator" target="_blank" rel="noopener">Project GitHub ↗</a></div>
+</header>
+<nav class="tabs" aria-label="Simulator sections">
+ <button type="button" class="tab active" data-tab="battle" aria-current="page"><span class="tab-icon">⚔</span> Battlefield</button>
+ <button type="button" class="tab" data-tab="builder"><span class="tab-icon">▦</span> Army Builder</button>
+ <button type="button" class="tab" data-tab="lab"><span class="tab-icon">◈</span> Battle Lab</button>
+ <button type="button" class="tab" data-tab="guide"><span class="tab-icon">ⓘ</span> Rules &amp; Guide</button>
+</nav>
+<main>
+ <section class="banner"><strong>Independent homebrew playtest</strong><span>Combat and unit costs are illustrative—not a replacement for the full New Recruit data, codex rules, or official Warhammer 40,000 gameplay.</span></section>
+ <section id="view-battle" class="view active" aria-labelledby="battle-title">
+  <div class="section-lead"><div><p class="eyebrow">TACTICAL COMMAND</p><h2 id="battle-title">Contested frontier</h2><p>Command your force against an automated opponent. Select a unit, then click a destination or enemy.</p></div>
+   <div class="lead-buttons"><button type="button" class="btn ghost" id="save-game">Save battle</button><button type="button" class="btn ghost" id="load-game">Load battle</button><button type="button" class="btn ghost" id="export-game">Export JSON</button><button type="button" class="btn ghost" id="import-game">Import JSON</button></div></div>
+  <div class="scoreboard" id="scoreboard" aria-live="polite"></div>
+  <div class="battle-layout">
+    <section class="battle-main panel"><div class="panel-top"><div><p class="eyebrow">TACTICAL GRID · 12 × 8</p><h3>Battlefield overview</h3></div><div class="legend"><span><i class="legend-square ally"></i> Friendly</span><span><i class="legend-square foe"></i> Opposing</span><span><i class="legend-square cover"></i> Cover</span><span><i class="legend-square wall"></i> Blocked</span></div></div>
+      <div class="board-frame"><div id="battle-grid" class="battle-grid" role="group" aria-label="Twelve column, eight row tactical battlefield"></div></div>
+      <div id="battle-feedback" class="feedback" role="status" aria-live="polite">Choose a friendly unit to begin.</div>
+      <div class="phase-actions"><div class="phase-hint" id="phase-hint"></div><div class="phase-buttons"><button class="btn secondary" type="button" id="new-battle">Restart battle</button><button class="btn secondary" type="button" id="auto-finish">Auto-finish</button><button class="btn primary" type="button" id="next-phase">Next phase →</button></div></div>
+    </section>
+    <aside class="battle-aside"><section class="panel detail-panel"><p class="eyebrow">UNIT INSPECTOR</p><div id="selected-unit"><p class="muted">Select any unit on the map to view its status and attacks.</p></div></section>
+    <section class="panel objectives-panel"><p class="eyebrow">STRATEGIC OBJECTIVES</p><div id="objectives"></div></section>
+    <section class="panel log-panel"><div class="panel-title-line"><p class="eyebrow">COMBAT FEED</p><button class="tiny-button" id="download-log" type="button">Export log ↓</button></div><div id="combat-feed" class="log-feed" aria-live="polite"></div></section></aside>
+  </div>
+ </section>
+ <section id="view-builder" class="view" aria-labelledby="builder-title" hidden><div class="section-lead"><div><p class="eyebrow">FORCE ORGANIZATION</p><h2 id="builder-title">Army Builder</h2><p>Build up to 14 units per side. Profile points are simulator-only estimates for experimental balance testing.</p></div><button class="btn primary" id="apply-musters" type="button">Start battle with these armies →</button></div>
+   <div class="builder-layout"><section class="panel"><div class="builder-controls"><label for="builder-side">Editing army<select id="builder-side"><option value="player">Friendly force</option><option value="enemy">Opposing force</option></select></label><label for="faction-filter">Unit catalogue<select id="faction-filter"><option value="ALL">All four factions</option><option value="IW">Infernal Warriors</option><option value="FC">Frozen Cogs</option><option value="AD">Abandoned Dead</option><option value="ST">Silver Tempests</option></select></label><label for="points-limit">Points target<select id="points-limit"><option value="500">500 pts</option><option value="1000" selected>1,000 pts</option><option value="2000">2,000 pts</option><option value="3000">3,000 pts</option></select></label></div><div class="subheading">Available datasheets <span class="muted" id="catalogue-count"></span></div><div id="unit-catalogue" class="unit-catalogue"></div></section><aside class="panel muster-panel"><div class="panel-title-line"><div><p class="eyebrow">CURRENT MUSTERS</p><h3>Order of battle</h3></div><button type="button" id="restore-musters" class="tiny-button">Restore defaults</button></div><div id="muster-list"></div><p class="helper">A unit in this builder is one abstracted tabletop squad or character. Weapon selection, Leader attachments and New Recruit imports are planned for a later update.</p></aside></div>
+ </section>
+ <section id="view-lab" class="view" aria-labelledby="lab-title" hidden><div class="section-lead"><div><p class="eyebrow">SIMULATED FIELD TRIALS</p><h2 id="lab-title">Battle Lab</h2><p>Test your current musters across ten reproducible computer-versus-computer battles. Compare outcomes, not predictions of real tabletop win rates.</p></div><button type="button" id="run-lab" class="btn primary">Run 10 simulations →</button></div>
+   <div class="lab-settings panel"><label for="lab-seed">Starting random seed <input id="lab-seed" type="number" value="20261110" min="1" max="4294967295"></label><span id="lab-muster-label" class="muted"></span></div><div id="lab-results"><div class="empty-state"><div class="empty-symbol">◈</div><h3>No trials run yet</h3><p>Run ten quick battles to get a win breakdown and a game-by-game scorecard.</p></div></div>
+ </section>
+ <section id="view-guide" class="view" aria-labelledby="guide-title"><div class="section-lead"><div><p class="eyebrow">FIELD MANUAL</p><h2 id="guide-title">How to play</h2><p>This alpha is a streamlined tactical board game inspired by tabletop wargaming, not an exact Warhammer 40,000 rules engine.</p></div></div>
+   <div class="guide-grid"><article class="panel guide-card"><span class="guide-num">01</span><h3>Build your forces</h3><p>Open <strong>Army Builder</strong>, add squads and characters on both sides, then start a new battle. The starter armies are approximately 1,000 simulator points each.</p></article><article class="panel guide-card"><span class="guide-num">02</span><h3>Movement</h3><p>Select a friendly unit, then click an unoccupied reachable tile. Walls and other units block paths. Each squad moves once per turn.</p></article><article class="panel guide-card"><span class="guide-num">03</span><h3>Shooting and charging</h3><p>Click <strong>Next phase</strong> to enter shooting; select your unit then an enemy in range. In charge phase, select an attacker and an enemy to attempt a 2D6 charge.</p></article><article class="panel guide-card"><span class="guide-num">04</span><h3>Fight and score</h3><p>During fight phase, attack adjacent enemies. After each round-two-or-later turn, score 5 VP per controlled objective. Model count × OC determines control.</p></article><article class="panel guide-card"><span class="guide-num">05</span><h3>End the round</h3><p>After fight phase, advance to let the opponent play automatically. The battle ends after five rounds or when a force is destroyed.</p></article><article class="panel guide-card"><span class="guide-num">06</span><h3>Save and test</h3><p>Save/load in this browser, export/import JSON, and run ten-game automated tests. Seeds reproduce the same outcomes with the same armies and engine version.</p></article></div>
+   <section class="panel limits"><h3>Alpha rules and known limitations</h3><p>Profiles and points are demonstrators, not imports from the live New Recruit catalogues. Combat uses D6 hit, wound, armour save, individual damage allocation and optional Feel No Pain. Terrain cover modifies saving throws; line of sight, stratagems, command points, full psychic tests, transport rules, reinforcement rules, model-by-model movement, detailed Leader attachments, and faction detachment rules are not yet implemented.</p><p>Infernal Warriors receive simplified 5+ Feel No Pain and one wound of start-of-turn recovery. Abandoned Dead Ghost-Shroud increases required ranged Hit rolls at long range. A nearby Abandoned Dead Nullifier makes simulated psychic shooting less accurate. Silver Tempests psychic mastery is represented by ranged attacks; Frozen Cogs containment has not been modeled. These simplifications are explicitly <strong>not</strong> final faction rules.</p><p>Names and designs belong to their respective owners. Gaul Campaign: Renegades is an independent, unofficial, non-commercial fan project and is not affiliated with or endorsed by Games Workshop.</p></section>
+ </section>
+</main>
+<footer><span>GAUL CAMPAIGN: RENEGADES</span><span>Unofficial playtest · no server required · all saves stay on your device</span></footer>
+<input type="file" id="import-file" hidden accept="application/json,.json">
+</body>
+</html>
