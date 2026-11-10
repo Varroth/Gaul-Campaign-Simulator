@@ -316,7 +316,7 @@ function configureUnit(base,config={},leaders=[]){
 function fingerprint(unit){
  const snapshot={id:unit.id,sourceId:unit.sourceId,faction:unit.faction,name:unit.name,points:unit.points,
   estimated:unit.estimated,models:unit.models,wp:unit.wp,ld:unit.ld,t:unit.t,save:unit.save,move:unit.move,oc:unit.oc,
-  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,leader:unit.leader,abilities:unit.abilities,category:unit.category,audit:unit.audit};
+  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,leader:unit.leader,abilities:unit.abilities,category:unit.category,audit:unit.audit,auditBlockers:unit.auditBlockers};
  return hash(JSON.stringify(snapshot));
 }
 function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
@@ -343,8 +343,27 @@ function reviewNotes(unit){
   ...(unit.abilities||[]).filter(a=>!/^ROSTER CARD|^Unit rule \/|^Wargear \/|^Leader assignment/i.test(a.name)).slice(0,14).map(a=>`${a.coverage==='modeled'?'Battle effect implemented':a.coverage==='partial'?'Partially modeled':'Reference only'} — ${a.name}: ${a.description.slice(0,210)}`),
   Number.isInteger(unit.rosterMax)?`New Recruit roster limit: up to ${unit.rosterMax} copies of this datasheet per army.`:null,
   unit.wargearLimits?.length?`Audited equipment quotas: ${unit.wargearLimits.map(x=>x.description).join('; ')}.`:null,
+  ...(unit.auditBlockers||[]).map(x=>'Audit blocker — '+x),
   statusFor(unit)==='verified'?'Full combat mapping reviewed and pinned to this catalogue revision.':'Wargear alternatives, restrictions and special rules have NOT been fully verified for the combat engine.'
  ].filter(Boolean);
+}
+// Source-derived blockers describe what still prevents a unit from being Verified.
+function unitAuditBlockers(node,form,profileIndex,abilities){
+ const problems=[];
+ const options=descendants(node,'selectionEntryGroup').filter(g=>path(g,'selectionEntries','selectionEntry').length>1);
+ const modifiers=descendants(node,'modifier').length,conditions=descendants(node,'condition').length;
+ const inline=new Set(descendants(node,'profile').map(p=>value(p,'id')));
+ const missing=descendants(node,'infoLink').filter(x=>value(x,'type')==='profile'&&value(x,'targetId')&&!profileIndex.has(value(x,'targetId'))&&!inline.has(value(x,'targetId'))).length;
+ const pending=(abilities||[]).filter(a=>a.coverage!=='modeled'&&
+  !/^(?:ROSTER CARD|Wargear \/|Unit rule \/|Unit composition \/|LEADER Assignment|Mortal war-host)/i.test(a.name));
+ if(!form?.selected?.models)problems.push('Default model count needs full source verification.');
+ if((form?.choices?.length||0)>1)problems.push((form.choices.length-1)+' alternative formation(s) need separate equipment and cost tests.');
+ if(options.length)problems.push(options.length+' selectable equipment group(s) need complete legality checks.');
+ if(modifiers||conditions)problems.push(modifiers+' modifier(s) and '+conditions+' condition(s) require exact points and availability evaluation.');
+ if(missing)problems.push(missing+' weapon or ability reference(s) are not locally resolved.');
+ if(pending.length)problems.push(pending.length+' reference-only or partially modeled ability descriptor(s) still need tests.');
+ problems.push('Full visibility, detachment, mission and specialized movement/combat subsystems remain incomplete.');
+ return problems;
 }
 function parseCatalogue(xml,faction,sourceVersion=''){
  if(!(faction in FILES))throw Error('Unknown catalogue faction.');
@@ -382,6 +401,7 @@ function parseCatalogue(xml,faction,sourceVersion=''){
    equipmentMenus:linked.slots,special,source:'linked',revision,estimated:p.estimated,category:cat,
    audit:{points:p.basis,unitStats:fieldCoverage?'source':'fallback',modelCount:declaredModels?'declared':'inferred',ranged:linked.weapons.some(w=>w.mode==='ranged')?'source':weapons.rangedFromSource?'source':'fallback',melee:linked.weapons.some(w=>w.mode==='melee')?'source':weapons.meleeFromSource?'source':'fallback'},
    description:`New Recruit ${cat||'datasheet'} · default squad size and wargear (playtest combat)${p.estimated?' · simulator point estimate':''}.`};
+  unit.auditBlockers=unitAuditBlockers(node,form,profileIndex,unit.abilities);
   unit.verification=statusFor(unit,sourceVersion);
   result.push(unit);
  }

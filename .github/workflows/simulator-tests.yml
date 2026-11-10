@@ -41,3 +41,13 @@ jobs:
         run: python scripts/audit_roster_rules.py upstream/Infernal_Warriors.cat
       - name: Audit named Infernal Warriors source abilities and combat coverage
         run: python scripts/audit_abilities.py upstream/Infernal_Warriors.cat
+      - name: Generate 74-unit source audit
+        run: python scripts/audit_unit_matrix.py upstream/Infernal_Warriors.cat --out verification-artifacts
+      - name: Upload individual unit verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infernal-unit-audit
+          path: verification-artifacts/
+          if-no-files-found: warn
+          retention-days: 30

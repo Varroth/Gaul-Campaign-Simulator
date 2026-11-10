@@ -36,3 +36,14 @@ test('cached data cannot forge Verified profile status',()=>{
  const loaded=C.readCache(storage);
  assert.equal(loaded.catalogues.IW.units[0].verification,'synced');
 });
+
+test('source-specific audit blockers appear in verification details',()=>{
+ const p={id:'nr-iw-audit-fixture',source:'linked',name:'Audit test',
+  audit:{points:'formation',unitStats:'source',modelCount:'declared',ranged:'source',melee:'source'},
+  auditBlockers:['Alternative formations need tests','Nested menus need review'],
+  sizeOptions:[],abilities:[],wargearLimits:[],loadout:[],special:{}};
+ const notes=C.reviewNotes(p);
+ assert.ok(notes.some(n=>n.includes('Audit blocker')&&n.includes('Alternative formations')));
+ assert.ok(notes.some(n=>n.includes('Audit blocker')&&n.includes('Nested menus')));
+ assert.equal(C.statusFor(p),'synced');
+});

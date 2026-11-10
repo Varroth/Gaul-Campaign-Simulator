@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.8 (Infernal Warriors control, abilities, and combat integration)
+# Gaul Campaign Simulator — Alpha 0.8.1 (Infernal Warriors per-unit source-audit)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -72,3 +72,9 @@ See [Source roster rules and combat effects](docs/ROSTER_RULES_V7.md). **0 units
 - Ability descriptions display **Modeled / Reference only** in the inspector. This is separate from the overall **Synced / Verified / Sim Estimate** labels. No unit is fully Verified yet.
 
 **Still missing or abstracted:** transport embark/disembark and capacity, Reserves and turn-one Cohort Insertion, aircraft/hover movement, deployment, exact line of sight/terrain, mortal wound interactions and all stratagems/detachment modifiers, every conditional wargear and multi-entry selection graph, and full source-to-simulation validation for all 74 units. Do not use Battle Lab results as proof of tournament balance or exact points/rules fidelity. See [coverage notes](docs/COMBAT_COVERAGE_V8.md).
+
+## Individual source checks (Alpha 0.8.1)
+
+The Army Builder's Verification details show per-unit blockers for alternative formations, wargear legality, conditional modifiers and partially modeled abilities. They do not promote any incomplete unit to Verified.
+
+The simulator CI workflow checks out the current New Recruit source read-only and produces a 74-unit JSON and Markdown audit, pinned to the XML Git blob SHA. Download the artifact from [Simulator Regression Tests](https://github.com/Varroth/Gaul-Campaign-Simulator/actions/workflows/simulator-tests.yml).
