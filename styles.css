@@ -3,3 +3,17 @@
 @media(max-width:1160px){.battle-layout,.builder-layout{grid-template-columns:minmax(0,1fr)}.battle-aside{display:grid;grid-template-columns:1fr 1fr;gap:12px}.detail-panel{grid-row:span 2}.log-panel{min-height:210px}.scoreboard{grid-template-columns:1fr .75fr 1fr}.guide-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){.site-header{padding:18px 14px}.brand h1{font-size:17px}.brand-mark{width:39px;height:44px;font-size:20px}.header-actions .live-indicator{display:none}.header-actions{gap:0}.quiet-link{font-size:10px}.tabs{padding:0 8px;justify-content:space-between;gap:0}.tab{padding:13px 6px;font-size:10px}.tab-icon{display:none}main{padding:17px 12px}.banner{display:block;font-size:11px}.banner strong{display:block;margin-bottom:3px}.section-lead{display:block}.section-lead h2{font-size:24px}.lead-buttons{justify-content:flex-start;margin-top:15px}.scoreboard{grid-template-columns:1fr 1fr;gap:8px}.score.center{grid-column:1/-1;grid-row:1}.score{padding:12px}.score .metric{font-size:25px}.panel{padding:13px}.battle-aside{display:flex}.board-frame{padding:5px}.battle-grid{min-width:455px}.builder-controls{grid-template-columns:1fr 1fr}.builder-controls label:last-child{grid-column:1/-1}.lab-metrics{gap:7px}.lab-metric{padding:14px}.lab-metric b{font-size:23px}.guide-grid{grid-template-columns:1fr}.lab-settings{display:block}.lab-settings .muted{display:block;text-align:left;margin-top:12px}footer{padding:17px;display:block}footer span{display:block;margin:7px 0}}@media(max-width:400px){.brand .eyebrow{font-size:8px}.brand h1{font-size:14px}.edition{font-size:7px}.phase-buttons .btn{font-size:11px;padding:9px}.score .score-sub{font-size:9px}}
 
+/* Live New Recruit catalogue browser */
+.catalogue-bridge{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:0 0 16px;padding:18px 21px;background:linear-gradient(110deg,#1d2c2f,#151c25);border-color:#52675c}
+.catalogue-bridge .eyebrow{margin:0 0 7px}
+.catalogue-bridge strong{font-size:13px;color:#d9e9d9}
+.catalogue-bridge .muted{margin:7px 0 0;max-width:850px}
+.catalogue-bridge a{color:#a9d3de}
+.catalogue-bridge button{white-space:nowrap}
+.catalogue-bridge button:disabled{opacity:.5;cursor:wait}
+.catalogue-search{margin-bottom:16px;font-size:12px}
+.catalogue-search input{margin-top:6px;font-weight:normal}
+.live-source-tag{font-size:9px;font-weight:700;color:#b6d7c4;border:1px solid #435c50;padding:2px 5px;border-radius:4px;margin-left:4px;white-space:nowrap}
+.live-source-tag.estimate{color:#e3c08b;border-color:#755d3e}
+.live-count{font-size:11px;color:#bbd0d4;margin:2px 0}
+@media(max-width:720px){.catalogue-bridge{display:block}.catalogue-bridge button{margin-top:12px;width:100%}}

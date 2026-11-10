@@ -1,0 +1,190 @@
+/* Live, read-only New Recruit catalogue bridge. No keys or external libraries.
+   Reads only public files from Varroth/Gaul-Campaign-Renegades. */
+(function(root,factory){
+ const api=factory();
+ if(typeof module==='object' && module.exports)module.exports=api;
+ if(root)root.GaulCatalogue=api;
+})(typeof globalThis!=='undefined'?globalThis:this,function(){
+'use strict';
+const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
+const BRANCH='main';
+const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
+const CACHE_KEY='gaul-campaign-catalogue-cache-v1';
+const CACHE_VERSION=1;
+const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
+const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
+const MANIFEST=RAW+'catalogue-manifest.json';
+const MAX_CACHE_AGE=45*24*3600*1000;
+const MAX_TEMPLATES=600;
+const value=(el,attr)=>el?.getAttribute?.(attr)||'';
+const childElements=(el)=>Array.from(el?.childNodes||[]).filter(n=>n.nodeType===1);
+const children=(el,name)=>childElements(el).filter(n=>n.localName===name);
+const path=(el,...names)=>names.reduce((nodes,name)=>nodes.flatMap(node=>children(node,name)),[el]);
+const descendants=(el,name)=>Array.from(el?.getElementsByTagNameNS?.('*',name)||[]);
+const bounded=(n,min,max,fallback)=>Number.isFinite(n)?Math.min(max,Math.max(min,n)):fallback;
+const int=(v)=>{const m=String(v||'').match(/^-?\d+(?:\.\d+)?/);return m?Number(m[0]):NaN;};
+const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,55);
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return (h>>>0).toString(36);}
+function field(profile,key){
+ const item=descendants(profile,'characteristic').find(c=>value(c,'name').toLowerCase()===key.toLowerCase());
+ return item?.textContent?.trim()||'';
+}
+function parseWeapon(profile,mode){
+ if(!profile)return null;
+ const range=field(profile,'Range');
+ if(mode==='melee'? !/melee|close combat/i.test(range) : /melee|close combat/i.test(range))return null;
+ const attacks=int(field(profile,'A'));
+ const skill=int(field(profile,'BS/WS'));
+ const strength=int(field(profile,'S'));
+ const ap=int(field(profile,'AP'));
+ const damage=int(field(profile,'D'));
+ const dist=int(range);
+ return {attacks:bounded(attacks,1,10,2),range:mode==='melee'?1:bounded(dist/2,1,12,5),
+  s:bounded(strength,2,22,4),ap:bounded(Math.abs(ap),0,5,0),damage:bounded(damage,1,9,1),skill:bounded(skill,2,6,3)};
+}
+function pointsFrom(element){
+ const costs=path(element,'costs','cost').filter(c=>/^(pts|points)$/i.test(value(c,'name')));
+ return costs.length?int(value(costs[0],'value')):NaN;
+}
+function minModels(el){
+ const c=path(el,'constraints','constraint').find(x=>value(x,'type')==='min'&&value(x,'field')==='selections');
+ const n=c?int(value(c,'value')):NaN;
+ return Number.isFinite(n)?Math.max(0,n):0;
+}
+function isArmouredVehicle(name,category){return /vehicle|tank|dreadnought|daemon engine|artillery|transport|aircraft|land raider|rhino|predator|vindicat|defiler|crawler|gunship|drop pod|siege engine|automata/i.test(name+' '+category);}
+function collectUnitRoots(doc){
+ const root=doc.documentElement,found=[],seen=new Set();
+ const refs=new Map(descendants(root,'selectionEntry').filter(e=>value(e,'id')).map(e=>[value(e,'id'),e]));
+ const add=(item)=>{if(!item)return;const id=value(item,'id')||value(item,'name');if(value(item,'type')!=='unit'||!id||seen.has(id)||value(item,'hidden')==='true')return;seen.add(id);found.push(item);};
+ const walkGroup=(group)=>{for(const e of children(group,'selectionEntries').flatMap(c=>children(c,'selectionEntry')))add(e);
+  for(const link of children(group,'entryLinks').flatMap(c=>children(c,'entryLink')))add(refs.get(value(link,'targetId')));
+  for(const sub of children(group,'selectionEntryGroups').flatMap(c=>children(c,'selectionEntryGroup')))walkGroup(sub);
+ };
+ for(const e of path(root,'selectionEntries','selectionEntry'))add(e);
+ for(const link of path(root,'entryLinks','entryLink'))add(refs.get(value(link,'targetId')));
+ for(const g of path(root,'selectionEntryGroups','selectionEntryGroup'))walkGroup(g);
+ // Some New Recruit exports place their selectable root units in sharedSelectionEntries.
+ if(found.length===0)for(const e of path(root,'sharedSelectionEntries','selectionEntry'))add(e);
+ return found;
+}
+function rootProfile(unit){
+ const profiles=descendants(unit,'profile').filter(p=>/^(Unit|Model)$/i.test(value(p,'typeName')));
+ return profiles[0]||null;
+}
+function countFor(unit,name,cat){
+ const troop=descendants(unit,'selectionEntry').filter(n=>value(n,'type')==='model');
+ const count=troop.reduce((n,x)=>n+minModels(x),0);
+ if(count>0)return Math.min(count,20);
+ const own=minModels(unit);
+ if(own>1)return Math.min(own,20);
+ if(isArmouredVehicle(name,cat)||/character|command|captain|chaplain|lord|master|seer|hero|prince/i.test(name+' '+cat))return 1;
+ return 5;
+}
+function getStats(unit,name,category){
+ const p=rootProfile(unit);
+ const vehicle=isArmouredVehicle(name,category);
+ const m=field(p,'M'),move=bounded(Math.round(int(m)/2),1,8,vehicle?3:3);
+ const t=bounded(int(field(p,'T')),2,16,vehicle?9:4);
+ const save=bounded(int(field(p,'Sv')),2,6,vehicle?3:3);
+ const wp=bounded(int(field(p,'W')),1,24,vehicle?10:2);
+ const oc=bounded(int(field(p,'OC')),0,10,vehicle?3:2);
+ return {move,t,save,wp,oc};
+}
+function getPoints(unit,modelCount,stats){
+ const explicit=pointsFrom(unit);
+ if(Number.isFinite(explicit)&&explicit>0)return {points:bounded(Math.round(explicit),1,3000,120),estimated:false};
+ // Some catalogue entries charge by model, not at the parent unit entry.
+ const model=descendants(unit,'selectionEntry').find(e=>value(e,'type')==='model'&&pointsFrom(e)>0);
+ const perModel=model?pointsFrom(model):NaN;
+ if(Number.isFinite(perModel)&&perModel>0)return {points:bounded(Math.round(perModel*modelCount),1,3000,120),estimated:false};
+ // This is explicitly a game-only placeholder, never presented as New Recruit points.
+ return {points:bounded(Math.round(modelCount*stats.wp*(stats.t>=8?18:stats.save<=2?17:12)),25,650,120),estimated:true};
+}
+function getWeapons(unit,stats){
+ const profiles=descendants(unit,'profile').filter(p=>value(p,'typeName')==='Weapon');
+ let ranged=null,melee=null;
+ for(const profile of profiles){
+  ranged ||=parseWeapon(profile,'ranged');
+  melee ||=parseWeapon(profile,'melee');
+  if(ranged&&melee)break;
+ }
+ return {ranged:ranged||{attacks:stats.t>=8?3:2,range:5,s:stats.t>=8?8:4,ap:0,damage:1,skill:3},
+  melee:melee||{attacks:stats.t>=8?3:2,range:1,s:stats.t>=8?8:4,ap:0,damage:1,skill:3}};
+}
+function categoryFor(unit){const links=path(unit,'categoryLinks','categoryLink');return links.map(x=>value(x,'name')).filter(Boolean).slice(0,3).join(', ');}
+function parseCatalogue(xml,faction){
+ if(!(faction in FILES))throw Error('Unknown catalogue faction.');
+ if(typeof DOMParser==='undefined')throw Error('This browser does not support XML parsing.');
+ const doc=new DOMParser().parseFromString(xml,'application/xml');
+ if(descendants(doc,'parsererror').length||doc.documentElement?.localName!=='catalogue')throw Error('New Recruit catalogue XML was invalid.');
+ const nodes=collectUnitRoots(doc),revision=value(doc.documentElement,'revision');
+ const result=[];
+ for(const node of nodes){
+  const name=value(node,'name').trim();if(!name)continue;
+  const cat=categoryFor(node),stats=getStats(node,name,cat),models=countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
+  const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
+  const vehicle=isArmouredVehicle(name,cat),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
+  const special=faction==='IW'&&!vehicle&&!mortal?{fnp:5,regen:1}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
+  result.push({id,faction,name,points:p.points,models,wp:stats.wp,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
+   ranged:weapons.ranged,melee:weapons.melee,special,source:'linked',revision,estimated:p.estimated,category:cat,
+   description:`New Recruit ${cat||'datasheet'} · simplified battle rules${p.estimated?' · simulator point estimate':''}.`});
+ }
+ if(result.length>MAX_TEMPLATES)throw Error('Catalogue contains unexpectedly many units.');
+ return {faction,revision,units:result};
+}
+function readCache(storage){
+ try{
+  const data=JSON.parse((storage||localStorage).getItem(CACHE_KEY)||'null');
+  if(data?.v!==CACHE_VERSION||!data.cachedAt||Date.now()-data.cachedAt>MAX_CACHE_AGE)return null;
+  if(!data.catalogues||typeof data.catalogues!=='object')return null;
+  for(const [f,x] of Object.entries(data.catalogues)){
+   if(!(f in FILES)||!Array.isArray(x.units)||x.units.length>MAX_TEMPLATES)return null;
+   for(const u of x.units)if(u.faction!==f||typeof u.name!=='string'||!u.id?.startsWith('nr-')||!Number.isFinite(u.points)||u.points<1)return null;
+  }
+  return data;
+ }catch(e){return null;}
+}
+function writeCache(data,storage){try{(storage||localStorage).setItem(CACHE_KEY,JSON.stringify(data));return true;}catch(e){return false;}}
+async function fetchJson(url,request){const resp=await request(url,{cache:'no-store',credentials:'omit'});if(!resp.ok)throw Error(`GitHub returned HTTP ${resp.status}`);return resp.json();}
+async function fetchText(url,request){const resp=await request(url,{cache:'no-store',credentials:'omit'});if(!resp.ok)throw Error(`Catalogue request returned HTTP ${resp.status}`);return resp.text();}
+async function readVersions(request){
+ try{
+  const tree=await fetchJson(TREE,request);
+  if(!Array.isArray(tree.tree))throw Error('No file tree returned.');
+  const versions={};
+  for(const [f,file] of Object.entries(FILES))versions[f]=tree.tree.find(x=>x.path===file&&x.type==='blob')?.sha||null;
+  if(!Object.values(versions).some(Boolean))throw Error('Catalogue files not found in upstream repository.');
+  return {versions,source:'GitHub tree'};
+ }catch(error){
+  // GitHub anonymous API limits can be reached; use the public manifest as a fallback.
+  const manifest=await fetchJson(MANIFEST,request);
+  const versions={};for(const [f,file] of Object.entries(FILES))versions[f]=manifest.files?.find(x=>x.file===file)?.sha256||null;
+  if(!Object.values(versions).some(Boolean))throw Error('New Recruit manifest had no catalogue revisions.');
+  return {versions,source:'catalogue manifest'};
+ }
+}
+async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=()=>{}}={}){
+ const cached=readCache(storage),data=cached||{v:CACHE_VERSION,cachedAt:Date.now(),catalogues:{}};
+ let versions,versionSource;
+ try{({versions,source:versionSource}=await readVersions(request));}
+ catch(e){onStatus({type:'offline',message:`Unable to check New Recruit: ${e.message}`,cached:!!cached});return {ok:false,cached:!!cached,error:e.message,counts:Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]))};}
+ let changed=0,failed=0;
+ for(const [f,file] of Object.entries(FILES)){
+  if(!versions[f])continue;
+  if(!force&&data.catalogues[f]?.version===versions[f]){onStatus({type:'unchanged',faction:f,count:data.catalogues[f].units.length});continue;}
+  onStatus({type:'loading',faction:f,message:`Loading ${f} from New Recruit…`});
+  try{
+   const xml=await fetchText(RAW+file+'?v='+encodeURIComponent(versions[f]),request);
+   const parsed=parseCatalogue(xml,f);
+   if(!parsed.units.length&&f!=='ST')throw Error('No playable root units were found.');
+   data.catalogues[f]={version:versions[f],revision:parsed.revision,units:parsed.units};
+   data.cachedAt=Date.now();writeCache(data,storage);
+   changed++;onUpdate(f,parsed.units);onStatus({type:'loaded',faction:f,count:parsed.units.length,revision:parsed.revision});
+  }catch(error){failed++;onStatus({type:'error',faction:f,message:`${f}: ${error.message}`,cached:!!data.catalogues[f]});}
+ }
+ if(changed===0&&failed===0){data.cachedAt=Date.now();writeCache(data,storage);}
+ const counts=Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]));
+ return {ok:failed===0,changed,failed,counts,versionSource,cached:!!cached};
+}
+return {REPOSITORY,FILES,CACHE_KEY,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
+});

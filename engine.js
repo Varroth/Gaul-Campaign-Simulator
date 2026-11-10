@@ -55,6 +55,22 @@ const TEMPLATES=[
  melee:{attacks:melee[0],range:melee[1],s:melee[2],ap:melee[3],damage:melee[4],skill:melee[5]}
 }));
 const BY_ID=Object.fromEntries(TEMPLATES.map(x=>[x.id,x]));
+// Live catalogue profiles are added at runtime; original playtest units remain as save-compatible fallbacks.
+function registerLinked(faction,units){
+ if(!FACTIONS[faction]||!Array.isArray(units)||units.length>600)throw Error('Invalid linked catalogue data.');
+ for(const t of TEMPLATES)if(t.source==='linked'&&t.faction===faction)t.visible=false;
+ let count=0;
+ for(const source of units){
+  if(!source||source.faction!==faction||typeof source.id!=='string'||!source.id.startsWith('nr-')||typeof source.name!=='string'||!source.name.trim()||source.name.length>180)continue;
+  const t={...source,visible:true};
+  if(!Number.isInteger(t.points)||t.points<1||t.points>3000||!Number.isInteger(t.models)||t.models<1||t.models>20)continue;
+  const existing=BY_ID[t.id];
+  if(existing){Object.assign(existing,t);}
+  else{TEMPLATES.push(t);BY_ID[t.id]=t;}
+  count++;
+ }
+ return count;
+}
 const DEFAULT_PLAYER=['iw-varroth','iw-ashen','iw-berserkers','fc-iron','fc-servitors'];
 const DEFAULT_ENEMY=['ad-vephar','ad-triarch','ad-breach','ad-shadow','st-stormseer','st-vanguard'];
 const OBJECTIVES=[{x:3,y:2,id:'A'},{x:6,y:4,id:'B'},{x:8,y:5,id:'C'}];
@@ -270,6 +286,5 @@ function validateLoadedState(g){
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,FACTIONS,TEMPLATES,BY_ID,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,FACTIONS,TEMPLATES,BY_ID,registerLinked,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });
-

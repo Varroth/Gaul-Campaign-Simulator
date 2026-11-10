@@ -11,16 +11,27 @@ permissions:
 
 jobs:
   simulator-tests:
-    name: Engine and interface tests
+    name: Engine, catalogue & interface tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout simulator source
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Check JavaScript syntax
         run: |
           node --check engine.js
+          node --check catalogue.js
           node --check app.js
       - name: Run regression tests
         run: node --test tests/*.test.cjs
+      - name: Checkout live New Recruit catalogues (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Varroth/Gaul-Campaign-Renegades
+          path: upstream
+          persist-credentials: false
+      - name: Audit source catalogue XML structure
+        run: python scripts/audit_upstream.py upstream

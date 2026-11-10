@@ -1,39 +1,42 @@
-# Gaul Campaign: Renegades — Battle Simulator (Alpha 0.2)
+# Gaul Campaign Simulator — Alpha 0.3 (Live New Recruit Bridge)
 
-An **unofficial, self-contained browser-based tactical playtest** in a dedicated GitHub repository. The New Recruit army catalogues remain independent in [Gaul-Campaign-Renegades](https://github.com/Varroth/Gaul-Campaign-Renegades).
+An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
-## Play online
+## Play
 
-After GitHub Pages is enabled at **Settings → Pages → Deploy from a branch → `main` → `/(root)`**, the expected play URL is [https://varroth.github.io/Gaul-Campaign-Simulator/](https://varroth.github.io/Gaul-Campaign-Simulator/). Publication must be verified after enabling Pages.
+Once GitHub Pages is enabled, the game is at **https://varroth.github.io/Gaul-Campaign-Simulator/**. Open **Army Builder** to search units or filter by faction. Click **Sync latest units** at any time; the page also checks the source repository on load and periodically when an inactive tab is revisited.
 
-## Launch
+No user login or GitHub token is needed. The browser fetches public catalogue `.cat` XML files read-only and uses the GitHub tree's file checksums to avoid redundant downloads. Basic catalogue entries are cached on your device. If GitHub is unavailable, cached data (if present) or the built-in illustrative units remain available.
 
-1. Open `index.html` in a modern browser. No installation, account, internet connection or build step required.
-2. Choose a friendly unit, then an accessible tile in **Movement** phase. Advance through **Shooting → Charge → Fight**, selecting a friendly unit and clicking a valid opposing target.
-3. Finish the turn and let the AI play. Scoring begins in round 2; the battle ends after round 5 or force elimination.
-4. **Army Builder** changes each side's force; **Battle Lab** runs ten deterministic AI-vs-AI trials.
-5. **Save/Load** uses the current browser's localStorage. **Export/Import JSON** allows manual backups or transferring a battle to another browser.
+## What syncs automatically
 
-## Tech
+- Published selectable **unit names, catalogue revisions, basic unit characteristics** and easily interpretable base points from New Recruit.
+- Available units change on the next source check after a catalogue file changes, without manually copying the whole list between repositories.
+- The source repository does **not** need any automation, deploy key, workflow or special permissions for this to work.
 
-- `index.html` — interface; `styles.css` — responsive layout and battlefield; `app.js` — DOM interaction; `engine.js` — deterministic pure-JavaScript combat and AI engine.
-- `tests/` — Node built-in tests for engine + interface. Run `node --test tests/*.test.cjs` from repository root.
-- No libraries, trackers, calls to external APIs, or third-party assets.
+## What is *not* fully imported yet
 
-## Alpha limitations
+This is a tactical simulation, **not** a faithful renderer of every New Recruit selection graph or Warhammer tabletop rule. Complex unit composition, weapon menus, model-specific profiles, point modifiers, detachment rules, stratagems, leader attachments and detailed faction mechanics are not automatically translated. If a base cost cannot be read safely, the UI marks it as **SIM ESTIMATE**. Ranged/melee weapons shown in the inspector are representative and may use simplified placeholders. Do **not** use these profiles or Battle Lab results as validated army-list prices or competitive balance claims.
 
-34 **illustrative** unit templates span Infernal Warriors, Frozen Cogs, Abandoned Dead and Silver Tempests. Point values and weapon data are **simulator-only provisional estimates** and must not be mistaken for authoritative New Recruit army-list values. The initial armies use approximately 1,000 simulator points each.
+**Silver Tempests:** The source `Silver_Tempest.cat` currently has *zero* published root units. Its eight existing simulator playtest units remain selectable until that catalogue is populated.
 
-This is a simplified square-grid tactical abstraction, not a model-by-model reconstruction of any official edition. It implements movement obstacles, D6 hit/wound/save/damage, 5+ Feel No Pain, recovery, cover, basic factions effects, charge, fights, objectives, AI and batch simulation. Full line of sight, faction detachments, weapon options, command points, native roster import, exact squad/Leader attachment limits and Silver Tempests full psychic rules remain on the backlog.
+## Run locally
 
-Do not present generated battle-lab outcomes as measured real-life game balance or approved points values.
+Open `index.html` in a modern browser. Internet access is needed for the source sync; the original playtest units work offline. A local HTTP server can also be used (`python -m http.server`). Save and load work in the current browser, and game JSON may be exported/imported.
 
-## Proposed roadmap
+## Test
 
-- [ ] Import New Recruit roster exports and map actual catalogue rules to reviewed simulation profiles.
-- [ ] Full battle phases, line of sight, engagement, terrain types, objectives and missions.
-- [ ] Leader attachments, Lost Cohort supervision, Frozen Cogs engine protocols, Directorate Nullifier aura, Stormseer psychic hierarchy.
-- [ ] Compare AI strategy results to scripted deterministic scenarios; measure balance and publish known limitations.
-- [ ] GitHub Pages deployment verification, mobile UI QA and broader accessibility testing.
+`node --test tests/*.test.cjs`
 
-This is a fan-made homebrew project and not affiliated with Games Workshop.
+GitHub Actions also downloads the public New Recruit source repository **read-only** and audits the XML root unit layout against its published manifest. There are no third-party JavaScript libraries or browser tracking services.
+
+## Roadmap
+
+- [x] Live catalogue discovery and cache keyed to the source repository's file checksums.
+- [x] Searchable Army Builder and on-demand refresh.
+- [ ] Detailed profile/wargear/points translation with correct New Recruit modifier rules.
+- [ ] Formal Leader attachments and cross-faction allied force rules.
+- [ ] Terrain, line of sight, psychic mastery, engine containment and full faction abilities.
+- [ ] Multiplayer and narrative campaign persistence.
+
+Gaul Campaign Simulator is an independent non-commercial fan project, **not affiliated with or endorsed by Games Workshop**.

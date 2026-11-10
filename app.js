@@ -2,11 +2,15 @@
 'use strict';
 const E=window.GaulEngine;
 if(!E){document.body.textContent='Simulator engine failed to load.';return;}
+const LIVE=window.GaulCatalogue||null;
+const cachedCatalogues=LIVE?.readCache?.()||null;
+if(cachedCatalogues)for(const [f,item] of Object.entries(cachedCatalogues.catalogues||{}))E.registerLinked(f,item.units);
+const cachedCounts=Object.fromEntries(Object.entries(cachedCatalogues?.catalogues||{}).map(([f,x])=>[f,x.units.length]));
 const $=id=>document.getElementById(id);
 const html=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const copy=a=>[...a];
 const initialPlayer=copy(E.DEFAULT_PLAYER),initialEnemy=copy(E.DEFAULT_ENEMY);
-const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},selected:null,editor:'player',filter:'ALL',pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
+const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},selected:null,editor:'player',filter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
 const factionName=t=>E.FACTIONS[t.faction]?.name||'Unknown';
 const isPlayer=u=>u&&u.side==='player';
 const tFor=u=>E.template(u);
@@ -105,16 +109,52 @@ function resetBattle(){
  catch(err){message(err.message,true);tab('battle');}
 }
 function renderBuilder(){
- const side=state.editor,points=E.total(state.musters[side]),list=E.TEMPLATES.filter(t=>state.filter==='ALL'||t.faction===state.filter);
+ const side=state.editor,points=E.total(state.musters[side]),linkedFactions=new Set(Object.entries(state.linkedCounts).filter(([,n])=>n>0).map(([f])=>f));
+ const needle=state.search.toLowerCase().trim();
+ const list=E.TEMPLATES.filter(t=>{
+  if(t.source==='linked'&&t.visible===false)return false;
+  if(t.source!=='linked'&&linkedFactions.has(t.faction))return false;
+  if(state.filter!=='ALL'&&t.faction!==state.filter)return false;
+  return !needle||(`${t.name} ${t.category||''} ${factionName(t)}`).toLowerCase().includes(needle);
+ }).sort((a,b)=>a.faction.localeCompare(b.faction)||a.name.localeCompare(b.name));
  $('builder-side').value=side;$('faction-filter').value=state.filter;$('points-limit').value=String(state.pointsLimit);
- $('catalogue-count').textContent=`(${list.length} available)`;
- $('unit-catalogue').innerHTML=list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span></h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p></div><button type="button" data-add="${t.id}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join('');
+ if($('unit-search').value!==state.search)$('unit-search').value=state.search;
+ $('catalogue-count').textContent=`(${list.length} available${needle?' · filtered':''})`;
+ $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span>${t.source==='linked'?` <span class="live-source-tag ${t.estimated?'estimate':''}">${t.estimated?'SIM ESTIMATE':'NEW RECRUIT'}</span>`:''}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):'<p class="muted">No matching units. Change the faction filter or search terms.</p>';
  $('muster-list').innerHTML=['player','enemy'].map(s=>{
- const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
- return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
- ${state.musters[s].length?state.musters[s].map((id,i)=>`<div class="muster-row"><span>${html(E.BY_ID[id].name)} <span class="point-small">${E.BY_ID[id].points}</span></span><button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(E.BY_ID[id].name)}">×</button></div>`).join(''):'<p class="muted">No units selected.</p>'}</div>`;
+  const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
+  return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
+ ${state.musters[s].length?state.musters[s].map((id,i)=>`<div class="muster-row"><span>${html(E.BY_ID[id]?.name||'Unavailable datasheet')} <span class="point-small">${E.BY_ID[id]?.points??'?'}${E.BY_ID[id]?.estimated?'*':''}</span></span><button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(E.BY_ID[id]?.name||'unit')}">×</button></div>`).join(''):'<p class="muted">No units selected.</p>'}</div>`;
  }).join('');
  $('apply-musters').disabled=!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit);
+}
+function showSyncStatus(status,detail){
+ const el=$('catalogue-sync-status'),desc=$('catalogue-sync-detail');
+ if(!el||!desc)return;
+ el.textContent=status;
+ desc.textContent=detail;
+}
+async function syncCatalogues(force=false){
+ if(!LIVE||state.syncRunning)return;
+ state.syncRunning=true;
+ $('refresh-catalogues').disabled=true;
+ showSyncStatus('Checking New Recruit catalogues…','Changes in the source repository are detected when the simulator opens or when you select Sync latest units.');
+ const failures=[];
+ try{
+  const result=await LIVE.sync({force,
+   onUpdate(f,units){E.registerLinked(f,units);state.linkedCounts[f]=units.length;renderBuilder();},
+   onStatus(info){
+    if(info.type==='loading')showSyncStatus(info.message,'Downloading and reading the latest published New Recruit datasheet entries.');
+    if(info.type==='error')failures.push(info.message);
+    if(info.type==='loaded')showSyncStatus(`Loaded ${E.FACTIONS[info.faction].name}: ${info.count} units`,`New Recruit catalogue revision ${info.revision||'unknown'} · translated to simplified simulator battle profiles.`);
+   }
+  });
+  const summary=Object.entries(state.linkedCounts).map(([f,n])=>`${E.FACTIONS[f].short} ${n}`).join(' · ');
+  if(result.ok){showSyncStatus(`New Recruit connection current · ${summary||'No units published'}`,
+   result.changed?`Updated ${result.changed} faction catalogue(s) from ${result.versionSource}. Reloading the website later automatically checks for new units.`:'No changes since the last check. Your local catalogue cache is current.');}
+  else showSyncStatus(`Using ${summary?'cached and playtest':'playtest'} units · source check incomplete`,failures.join(' | ')||result.error||'GitHub source unavailable; previous units remain available.');
+ }catch(error){showSyncStatus('Catalogue synchronization unavailable',`${error.message}. Existing units remain selectable.`);}
+ finally{state.lastSyncCheck=Date.now();state.syncRunning=false;$('refresh-catalogues').disabled=false;renderBuilder();}
 }
 function addUnit(id){const arr=state.musters[state.editor],t=E.BY_ID[id];if(!t||arr.length>=14||E.total(arr)+t.points>state.pointsLimit)return;arr.push(id);renderBuilder();}
 function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);renderBuilder();}
@@ -154,6 +194,8 @@ function bind(){
  $('builder-side').addEventListener('change',ev=>{state.editor=ev.target.value;renderBuilder();});
  $('faction-filter').addEventListener('change',ev=>{state.filter=ev.target.value;renderBuilder();});
  $('points-limit').addEventListener('change',ev=>{state.pointsLimit=Number(ev.target.value);renderBuilder();});
+ $('unit-search').addEventListener('input',ev=>{state.search=ev.target.value;renderBuilder();});
+ $('refresh-catalogues').addEventListener('click',()=>syncCatalogues(true));
  $('unit-catalogue').addEventListener('click',ev=>{const b=ev.target.closest('[data-add]');if(b)addUnit(b.dataset.add);});
  $('muster-list').addEventListener('click',ev=>{const b=ev.target.closest('[data-remove-side]');if(b)removeUnit(b.dataset.removeSide,Number(b.dataset.removeIndex));});
  $('restore-musters').addEventListener('click',()=>{state.musters={player:copy(initialPlayer),enemy:copy(initialEnemy)};state.pointsLimit=1000;renderBuilder();});
@@ -166,6 +208,10 @@ function bind(){
  $('lab-results').addEventListener('click',ev=>{if(ev.target.closest('#export-lab')&&state.lab)download('gaul-campaign-battle-lab.json',JSON.stringify({musters:state.musters,results:state.lab},null,2),'application/json');});
 }
 window.addEventListener('error',ev=>{if($('battle-feedback'))message(`Simulator error: ${ev.message}`,true);});
-bind();renderBattle();
+bind();renderBattle();renderBuilder();
+if(LIVE){syncCatalogues();
+ // Check again when a long-idle tab is revisited; limit anonymous GitHub API requests.
+ window.addEventListener('focus',()=>{if(Date.now()-state.lastSyncCheck>15*60*1000)syncCatalogues();});
+ window.setInterval?.(()=>{if(Date.now()-state.lastSyncCheck>30*60*1000)syncCatalogues();},15*60*1000);
+}else showSyncStatus('Live catalogues unavailable','The original local playtest units are available. Reload with catalogue.js to enable syncing.');
 })();
-
