@@ -187,9 +187,10 @@ const ENGINE_ABILITY_NAMES=new Set([
  'Sustained Fire','Bound Targeter','Leviathan of Old','Breacher Shield',
  'Armoured Flight','Relic Plate','Blood-Bound Hunt','Blood God’s Assault',
  'Blood-Earned Discipline','Greater Daemon','Expeditionary Discipline',
- 'Legion Rush','Relic Mobility','Pursuit Column','Fast Spearhead' 
+ 'Legion Rush','Relic Mobility','Pursuit Column','Fast Spearhead',
+ 'Bloodletter Invocation','Passenger Manifest & capacity','Mobile Bastion','Legion Carrier' 
 ]);
-const PARTIAL_ABILITY_NAMES=new Set(['Afflicted Ferocity','Ashen Chain','Relic Plate','Legion Rush','Relic Mobility','Warmaster of the Twice-Condemned','Controlled Fury']);
+const PARTIAL_ABILITY_NAMES=new Set(['Afflicted Ferocity','Ashen Chain','Relic Plate','Legion Rush','Relic Mobility','Warmaster of the Twice-Condemned','Controlled Fury','Bloodletter Invocation','Passenger Manifest & capacity','Mobile Bastion','Legion Carrier']);
 function unitAbilities(unit){
  return path(unit,'profiles','profile').filter(p=>value(p,'typeName')==='Ability').map(p=>({
   name:value(p,'name'),description:field(p,'Description').slice(0,4000),
