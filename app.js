@@ -10,7 +10,7 @@ const $=id=>document.getElementById(id);
 const html=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const copy=a=>[...a];
 const initialPlayer=copy(E.DEFAULT_PLAYER),initialEnemy=copy(E.DEFAULT_ENEMY);
-const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},configEditor:null,selected:null,editor:'player',filter:'ALL',tierFilter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
+const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},deployment:{player:initialPlayer.map(()=>'field'),enemy:initialEnemy.map(()=>'field')},placement:null,configEditor:null,selected:null,editor:'player',filter:'ALL',tierFilter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
 const factionName=t=>E.FACTIONS[t.faction]?.name||'Unknown';
 const tier=t=>LIVE?.statusFor(t)||'sim-estimate';
 const tierLabel=t=>({'verified':'VERIFIED','synced':'SYNCED','sim-estimate':'SIM ESTIMATE'})[tier(t)];
@@ -26,11 +26,11 @@ function tab(name){
 function message(text,isError=false){state.feedback=text;state.feedbackError=isError;const box=$('battle-feedback');box.textContent=text;box.classList.toggle('error',isError);}
 function phaseLabel(phase){return ({movement:'Movement',shooting:'Shooting',charge:'Charge',fight:'Fight',finished:'Concluded'})[phase]||phase;}
 function renderScore(){
- const g=state.game,player=E.living(g,'player'),enemy=E.living(g,'enemy');
+ const g=state.game,player=E.living(g,'player'),enemy=E.living(g,'enemy'),playerReserves=E.reserveUnits(g,'player'),enemyReserves=E.reserveUnits(g,'enemy');
  const pTotal=E.total(state.musters.player),eTotal=E.total(state.musters.enemy);
- $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} units surviving · ${pTotal} pts</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
+ $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} field / ${playerReserves.length} reserve · ${pTotal} pts</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
  <div class="score center"><div class="score-title">BATTLE ROUND ${Math.min(g.round,E.MAX_ROUNDS)} / ${E.MAX_ROUNDS}</div><div class="metric">${phaseLabel(g.phase)}</div><div class="score-sub">${g.finished?(g.winner==='draw'?'DRAW':(g.winner==='player'?'FRIENDLY':'OPPOSING')+' VICTORY'):'Your turn'}</div></div>
- <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} units surviving · ${eTotal} pts</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
+ <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} field / ${enemyReserves.length} reserve · ${eTotal} pts</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
 }
 function isTargetable(attacker,target){
  const g=state.game;
@@ -49,7 +49,7 @@ function renderBoard(){
  const cells=[];
  for(let y=0;y<E.HEIGHT;y++)for(let x=0;x<E.WIDTH;x++){
    const key=`${x},${y}`,u=occupantMap.get(key),o=objMap.get(key),isWall=E.WALLS.has(key),isCover=E.COVER.has(key);
-   const move=selected&&selected.side==='player'&&g.phase==='movement'&&!u&&E.canMove(g,selected.uid,x,y);
+   const move=state.placement?E.canDeployReserve(g,g.units.find(q=>q.uid===state.placement.unitUid),x,y,{invoker:state.placement.kind==='invocation'?g.units.find(q=>q.uid===state.placement.thrallsUid):null}):selected&&selected.side==='player'&&g.phase==='movement'&&!u&&E.canMove(g,selected.uid,x,y);
    const attack=selected&&u&&isTargetable(selected,u);
    const cls=['cell',isWall?'blocked':'',isCover?'cover':'',move?'reachable':'',attack?'attackable':'',selected&&u?.uid===selected.uid?'selected':''].filter(Boolean).join(' ');
    let unitMarkup='';
@@ -79,6 +79,17 @@ function renderInspector(){
  ${state.game.directed?.player===u.uid?'<p class="muted">★ Directed Objective designated for friendly Infernal Warriors.</p>':''}
  <p class="profile-note">${tierTag(t)} ${html(t.description)}</p>${u.painPenalty?'<p class="muster-rule-warning">Warp-Aggravated Pain: −1 ranged Hit until your next Command phase.</p>':''}<p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
 }
+function renderReserves(){
+ const el=$('reserves-panel');if(!el)return;
+ const g=state.game,waiting=E.reserveUnits(g,'player');
+ const canAct=!g.finished&&g.phase==='movement'&&g.active==='player'&&g.round>=2;
+ const invokers=E.living(g,'player').filter(u=>E.template(u).name==='Bloodmarked Thralls'&&!u.battleshocked);
+ el.innerHTML=waiting.length?waiting.map(u=>{
+  const name=html(E.template(u).name),canInvoke=canAct&&name==='Bloodletters'&&invokers.length&&!g.invocationUsed?.player;
+  return `<div class="reserve-unit"><strong>${name}</strong><div class="reserve-unit-buttons"><button type="button" class="tiny-button" data-deploy-reserve="${html(u.uid)}" ${!canAct?'disabled':''}>Deploy from edge</button>${canInvoke?invokers.map(t=>`<button type="button" class="tiny-button" data-invoke-reserve="${html(u.uid)}" data-invoker="${html(t.uid)}">Invoke via Thralls ${html(t.uid)}</button>`).join(''):''}</div></div>`;
+ }).join(''):'<p class="muted">No friendly units are in Reserves.</p>';
+ el.innerHTML+=(g.invocationUsed?.player?'<p class="muted">Bloodletter Invocation used this battle.</p>':'')+(state.placement?'<button type="button" class="tiny-button" id="cancel-placement">Cancel placement</button>':'');
+}
 function renderObjectives(){
  const g=state.game;
  $('objectives').innerHTML=g.objectives.map(o=>{const who=E.objectiveOwner(g,o),className=who||'neutral',label=who==='player'?'Friendly control':who==='enemy'?'Opposing control':'Contested / neutral';
@@ -91,9 +102,9 @@ function renderFeed(){
 function renderBattle(){
  const g=state.game;
  if(state.selected&&!E.living(g).some(u=>u.uid===state.selected))state.selected=null;
- renderScore();renderBoard();renderInspector();renderObjectives();renderFeed();
+ renderScore();renderBoard();renderInspector();renderReserves();renderObjectives();renderFeed();
  const instructions={movement:'Move each selected friendly unit once. Green tiles are reachable.',shooting:'Select a friendly shooter, then click an enemy in range. Orange tiles are legal targets.',charge:'Select a friendly unit, then click an enemy to attempt a 2D6 charge.',fight:'Select a friendly unit and click an adjacent enemy to strike.',finished:'Battle complete. Restart, edit your armies, or export the report.'};
- $('phase-hint').textContent=instructions[g.phase];
+ $('phase-hint').textContent=state.placement?'Choose a highlighted square for '+(state.placement.kind==='invocation'?'Bloodletter Invocation.':'Reserve arrival.')+' Select Cancel to exit.':instructions[g.phase];
  $('next-phase').disabled=g.finished;$('next-phase').textContent=g.phase==='fight'?'End turn →':'Next phase →';
  $('auto-finish').disabled=g.finished;
  message(state.feedback,state.feedbackError);
@@ -101,6 +112,17 @@ function renderBattle(){
 function clickedCell(x,y){
  const g=state.game,u=E.living(g).find(u=>u.x===x&&u.y===y),selected=E.living(g).find(u=>u.uid===state.selected);
  if(g.finished){message('Battle has ended. Restart to play again.',true);return;}
+ if(state.placement){
+  const plan=state.placement;
+  const unit=g.units.find(q=>q.uid===plan.unitUid);
+  const invoker=plan.kind==='invocation'?g.units.find(q=>q.uid===plan.thrallsUid):null;
+  if(!E.canDeployReserve(g,unit,x,y,{invoker})){
+   message('Illegal position. Select a highlighted, unoccupied square.',true);renderBattle();return;
+  }
+  const res=plan.kind==='invocation'?E.invokeBloodletters(g,plan.thrallsUid,plan.unitUid,x,y):E.deployReserve(g,plan.unitUid,x,y);
+  message(res.ok?(plan.kind==='invocation'?'Paid Bloodletters invoked from Reserves.':'Reserve unit arrived.'):res.message,!res.ok);
+  if(res.ok)state.placement=null;renderBattle();return;
+ }
  if(u?.side==='player'){state.selected=u.uid;message(`Selected ${tFor(u).name}.`);renderBattle();return;}
  if(u&&selected&&u.side==='enemy'){
    if(g.phase==='shooting'||g.phase==='fight'){
@@ -118,7 +140,7 @@ function clickedCell(x,y){
  message('Select a friendly unit, then a valid tile or enemy target.',true);
 }
 function resetBattle(){
- try{state.game=E.createGame({player:state.musters.player,enemy:state.musters.enemy,seed:Date.now()>>>0});state.selected=null;message('New battle deployed. Select a friendly unit.');renderBattle();tab('battle');}
+ try{state.game=E.createGame({player:state.musters.player,enemy:state.musters.enemy,deployment:state.deployment,seed:Date.now()>>>0});state.selected=null;state.placement=null;message('New battle deployed. Select a friendly unit.');renderBattle();tab('battle');}
  catch(err){message(err.message,true);tab('battle');}
 }
 function configurable(t){const base=E.BY_ID[t?.baseId]||t;return !!(LIVE&&base?.faction==='IW'&&!base.isLeader&&base.source==='linked'&&base.formationConfigs?.length);}
@@ -263,9 +285,14 @@ function exportLog(){download('gaul-campaign-battle-report.txt',`Gaul Campaign: 
 function bind(){
  document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
  $('battle-grid').addEventListener('click',ev=>{const b=ev.target.closest('.cell');if(b&&!b.disabled)clickedCell(Number(b.dataset.x),Number(b.dataset.y));});
- $('next-phase').addEventListener('click',()=>{E.advance(state.game);state.selected=null;message(state.game.finished?'Battle complete.':state.game.phase==='movement'?`Battle round ${state.game.round} begins.`:`Entered ${phaseLabel(state.game.phase).toLowerCase()} phase.`);renderBattle();});
+ $('next-phase').addEventListener('click',()=>{state.placement=null;E.advance(state.game);state.selected=null;message(state.game.finished?'Battle complete.':state.game.phase==='movement'?`Battle round ${state.game.round} begins.`:`Entered ${phaseLabel(state.game.phase).toLowerCase()} phase.`);renderBattle();});
  $('auto-finish').addEventListener('click',()=>{E.finishByAuto(state.game);state.selected=null;message('Automated simulation completed.');renderBattle();});
  $('new-battle').addEventListener('click',resetBattle);
+ $('reserves-panel').addEventListener('click',ev=>{
+  if(ev.target.closest('#cancel-placement')){state.placement=null;renderBattle();return;}
+  const inv=ev.target.closest('[data-invoke-reserve]'),reg=ev.target.closest('[data-deploy-reserve]');
+  if(inv||reg){state.placement={kind:inv?'invocation':'reserve',unitUid:inv?.dataset.invokeReserve||reg?.dataset.deployReserve,thrallsUid:inv?.dataset.invoker||null};state.selected=null;message('Choose a highlighted empty square.');renderBattle();}
+ });
  $('save-game').addEventListener('click',save);$('load-game').addEventListener('click',load);$('export-game').addEventListener('click',exportJson);$('download-log').addEventListener('click',exportLog);
  $('import-game').addEventListener('click',()=>$('import-file').click());
  $('import-file').addEventListener('change',async ev=>{const file=ev.target.files?.[0];if(!file)return;try{if(file.size>500000)throw Error('Save file is unexpectedly large.');importData(JSON.parse(await file.text()));}catch(e){message(e.message,true);renderBattle();}ev.target.value='';});
