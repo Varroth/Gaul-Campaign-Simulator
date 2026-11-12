@@ -216,7 +216,7 @@ function renderBuilder(){
   const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
   return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
  ${state.musters[s].length?state.musters[s].map((id,i)=>{const t=E.BY_ID[id],base=E.BY_ID[t?.baseId]||t,stale=!!(t?.baseId&&t.sourceVersion!==base?.sourceVersion);
-  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}</span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
+  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option></select></label></span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
  }).join(''):'<p class="muted">No units selected.</p>'}</div>`;
  }).join('') + ['player','enemy'].flatMap(s=>E.musterProblems(state.musters[s]).map(err=>`<p class="muster-rule-warning" role="alert">${s==='player'?'Friendly':'Opposing'}: ${html(err)}</p>`)).join('');
  $('apply-musters').disabled=!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;})||E.musterProblems(state.musters[s]).length>0);
@@ -254,9 +254,9 @@ function addUnit(id){
  if(!t||arr.length>=14||E.total(arr)+t.points>state.pointsLimit)return;
  const errors=E.musterProblems([...arr,id]);
  if(errors.length){showSyncStatus('Roster limit reached',errors[0]);return;}
- arr.push(id);renderBuilder();
+ arr.push(id);state.deployment[state.editor].push('field');renderBuilder();
 }
-function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);state.configEditor=null;renderBuilder();}
+function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);state.deployment[side].splice(i,1);state.configEditor=null;renderBuilder();}
 function renderLab(){
  $('lab-muster-label').textContent=`Friendly ${E.total(state.musters.player)} pts / ${state.musters.player.length} units · Opposing ${E.total(state.musters.enemy)} pts / ${state.musters.enemy.length} units`;
  const r=state.lab;if(!r)return;
@@ -266,7 +266,7 @@ function renderLab(){
  <section class="panel"><h3>Win distribution</h3><div class="chart-track" role="img" aria-label="${p} friendly wins, ${enemy} opposing wins, ${draw} draws"><span class="chart-player" style="width:${100*p/r.length}%"></span><span class="chart-enemy" style="width:${100*enemy/r.length}%"></span><span class="chart-draw" style="width:${100*draw/r.length}%"></span></div><p class="muted">Average VP · Friendly ${avg('playerVP')} / Opposing ${avg('enemyVP')}. Outcomes are from an abstract simulation, not tournament or tabletop performance data.</p><div class="panel-title-line"><h3>Simulation results</h3><button class="tiny-button" id="export-lab" type="button">Export JSON ↓</button></div><div class="table-wrap"><table class="results-table"><thead><tr><th>Game</th><th>Seed</th><th>Winner</th><th>Friendly VP</th><th>Opposing VP</th><th>Survivors F/O</th></tr></thead><tbody>${r.map(x=>`<tr><td>${x.game}</td><td>${x.seed}</td><td>${x.winner==='player'?'Friendly':x.winner==='enemy'?'Opposing':'Draw'}</td><td>${x.playerVP}</td><td>${x.enemyVP}</td><td>${x.playerSurvivors} / ${x.enemySurvivors}</td></tr>`).join('')}</tbody></table></div></section>`;
 }
 function save(){
- try{localStorage.setItem('gaul-campaign-sim-v2',JSON.stringify({game:state.game,musters:state.musters,pointsLimit:state.pointsLimit,configurations:configuredSpecs()}));message('Battle saved on this device.');}
+ try{localStorage.setItem('gaul-campaign-sim-v2',JSON.stringify({game:state.game,musters:state.musters,pointsLimit:state.pointsLimit,configurations:configuredSpecs(),deployment:state.deployment}));message('Battle saved on this device.');}
  catch(e){message('Unable to use browser storage. Export JSON instead.',true);}renderBattle();
 }
 function importData(obj){
@@ -274,13 +274,13 @@ function importData(obj){
  const game=E.validateLoadedState(obj.game||obj);
  const settings=game.settings;
  if(!['player','enemy'].every(s=>Array.isArray(settings[s])&&settings[s].length>=1&&settings[s].length<=14&&settings[s].every(id=>!!E.BY_ID[id])))throw Error('This save references unsupported units.');
- state.game=game;state.musters={player:copy(settings.player),enemy:copy(settings.enemy)};state.pointsLimit=[500,1000,2000,3000].includes(obj.pointsLimit)?obj.pointsLimit:Math.max(1000,Math.ceil(Math.max(E.total(state.musters.player),E.total(state.musters.enemy))/1000)*1000);
+ state.game=game;state.musters={player:copy(settings.player),enemy:copy(settings.enemy)};state.deployment=E.normalizeDeployment(settings.deployment||obj.deployment,{player:state.musters.player,enemy:state.musters.enemy});state.placement=null;state.pointsLimit=[500,1000,2000,3000].includes(obj.pointsLimit)?obj.pointsLimit:Math.max(1000,Math.ceil(Math.max(E.total(state.musters.player),E.total(state.musters.enemy))/1000)*1000);
  if(![500,1000,2000,3000].includes(state.pointsLimit))state.pointsLimit=3000;
  state.selected=null;state.lab=null;message('Battle restored.');renderBattle();tab('battle');
 }
 function load(){try{const raw=localStorage.getItem('gaul-campaign-sim-v2');if(!raw)throw Error('No saved battle found in this browser.');importData(JSON.parse(raw));}catch(e){message(e.message,true);renderBattle();}}
 function download(filename,contents,type){const blob=new Blob([contents],{type});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);}
-function exportJson(){download('gaul-campaign-battle.json',JSON.stringify({game:state.game,pointsLimit:state.pointsLimit,configurations:configuredSpecs()},null,2),'application/json');}
+function exportJson(){download('gaul-campaign-battle.json',JSON.stringify({game:state.game,pointsLimit:state.pointsLimit,configurations:configuredSpecs(),deployment:state.deployment},null,2),'application/json');}
 function exportLog(){download('gaul-campaign-battle-report.txt',`Gaul Campaign: Renegades\nBattle seed: ${state.game.seed}\nScore: ${state.game.score.player}-${state.game.score.enemy}\n\n${[...state.game.log].reverse().join('\n')}\n`,'text/plain');}
 function bind(){
  document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
@@ -317,15 +317,20 @@ function bind(){
   const remove=ev.target.closest('[data-remove-side]');if(remove){removeUnit(remove.dataset.removeSide,Number(remove.dataset.removeIndex));return;}
   const edit=ev.target.closest('[data-edit-side]');if(edit){const key=edit.dataset.editSide+':'+edit.dataset.editIndex;state.configEditor=state.configEditor===key?null:key;renderBuilder();}
  });
- $('muster-list').addEventListener('change',ev=>{const sel=ev.target.closest('[data-config-kind]');if(sel)updateConfiguration(sel.dataset.configSide,Number(sel.dataset.configIndex),sel.dataset.configKind,sel.value,sel.dataset.configSlot);});
- $('restore-musters').addEventListener('click',()=>{state.musters={player:copy(initialPlayer),enemy:copy(initialEnemy)};state.pointsLimit=1000;state.configEditor=null;renderBuilder();});
+ $('muster-list').addEventListener('change',ev=>{
+ const dep=ev.target.closest('[data-deploy-side]');
+ if(dep){state.deployment[dep.dataset.deploySide][Number(dep.dataset.deployIndex)]=dep.value;renderBuilder();return;}
+ const sel=ev.target.closest('[data-config-kind]');
+ if(sel)updateConfiguration(sel.dataset.configSide,Number(sel.dataset.configIndex),sel.dataset.configKind,sel.value,sel.dataset.configSlot);
+});
+ $('restore-musters').addEventListener('click',()=>{state.musters={player:copy(initialPlayer),enemy:copy(initialEnemy)};state.deployment={player:initialPlayer.map(()=>'field'),enemy:initialEnemy.map(()=>'field')};state.pointsLimit=1000;state.configEditor=null;renderBuilder();});
  $('apply-musters').addEventListener('click',resetBattle);
  $('run-lab').addEventListener('click',()=>{
   if(!state.musters.player.length||!state.musters.enemy.length){$('lab-results').textContent='Build both armies first.';return;}
   const seed=Number($('lab-seed').value)||20261110;
   state.lab=E.battleLab(state.musters.player,state.musters.enemy,10,seed);renderLab();
  });
- $('lab-results').addEventListener('click',ev=>{if(ev.target.closest('#export-lab')&&state.lab)download('gaul-campaign-battle-lab.json',JSON.stringify({musters:state.musters,configurations:configuredSpecs(),results:state.lab},null,2),'application/json');});
+ $('lab-results').addEventListener('click',ev=>{if(ev.target.closest('#export-lab')&&state.lab)download('gaul-campaign-battle-lab.json',JSON.stringify({musters:state.musters,configurations:configuredSpecs(),deployment:state.deployment,results:state.lab},null,2),'application/json');});
 }
 window.addEventListener('error',ev=>{if($('battle-feedback'))message(`Simulator error: ${ev.message}`,true);});
 bind();renderBattle();renderBuilder();
