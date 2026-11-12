@@ -10,11 +10,16 @@ const raider={...basic,id:'nr-iw-trans-raider',name:'Land Raider',category:'Tran
  abilities:[{name:'Assault Ramp',description:'Capacity: 12 spaces, with Terminators using two each.'}]};
 const mastodon={...basic,id:'nr-iw-trans-mastodon',name:'Mastodon Heavy Transport',category:'Transport',points:550,
  abilities:[{name:'Mobile Bastion',description:'Capacity 30 Infantry spaces; Terminators use two spaces each.'}]};
+const razorback={...basic,id:'nr-iw-trans-razorback',name:'Razorback Fire-support Carrier',category:'Dedicated Transport',
+ abilities:[{name:'Passenger Manifest',description:'Capacity 6 spaces; no Terminators, Gravis, Jump Pack or daemon passengers.'}]};
+const spartan={...basic,id:'nr-iw-trans-spartan',name:'Spartan Assault Tank',category:'Transport',
+ abilities:[{name:'Legion Carrier',description:'Capacity 20 eligible Infantry spaces; Terminators count as two.'}]};
+const mortal={...basic,id:'nr-iw-trans-thralls',name:'Bloodmarked Thralls',category:'Infantry',models:10,special:{}};
 const squad={...basic,id:'nr-iw-trans-squad',name:'Despoiler Cadre',category:'Infantry',models:5,points:100,wp:3,t:4,special:{fnp:5,regen:1}};
 const terminators={...squad,id:'nr-iw-trans-term',name:'Ashen Chain Terminators',models:5,points:390};
 const jumper={...squad,id:'nr-iw-trans-jumper',name:'Assault Jump Cadre',models:5,points:155};
 const daemon={...squad,id:'nr-iw-trans-daemon',name:'Bloodletters',special:{daemon:true}};
-E.registerLinked('IW',[rhino,raider,mastodon,squad,terminators,jumper,daemon]);
+E.registerLinked('IW',[rhino,raider,mastodon,razorback,spartan,squad,terminators,jumper,daemon,mortal]);
 test('carrier capacities only recognized when backed by source ability wording',()=>{
  assert.equal(E.transportSpec(rhino).capacity,10);
  assert.equal(E.transportSpec(raider).capacity,12);
@@ -74,4 +79,16 @@ test('save validation preserves properly linked offboard passengers',()=>{
  assert.equal(E.validateLoadedState(structuredClone(g)).units[1].deployment,'embarked');
  const bad=structuredClone(g);bad.units[1].transportUid='nonsense';
  assert.throws(()=>E.validateLoadedState(bad),/invalid embarked passenger/);
+});
+
+test('source-grounded Razorback and Spartan capacity and Terminator rules',()=>{
+ assert.equal(E.transportSpec(razorback).capacity,6);
+ assert.equal(E.transportSpec(spartan).capacity,20);
+ assert.equal(E.passengerSpaces(squad,razorback),5);
+ assert.equal(E.passengerSpaces(terminators,razorback),null);
+ assert.equal(E.passengerSpaces(terminators,spartan),10);
+});
+test('ordinary power-armoured carriers refuse mortals without Astartes armour',()=>{
+ assert.equal(E.passengerSpaces(mortal,rhino),null);
+ assert.equal(E.passengerSpaces(mortal,razorback),null);
 });

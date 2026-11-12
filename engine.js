@@ -159,7 +159,11 @@ function musterProblems(ids){
 // Only source-identified ground carriers are supported in the first transport pass.
 function transportSpec(t){
  if(!t||t.source!=='linked'||t.faction!=='IW')return null;
- const table={'Rhino Carrier':{capacity:10,terminators:false},'Land Raider':{capacity:12,terminators:true},'Mastodon Heavy Transport':{capacity:30,terminators:true}};
+ const table={'Rhino Carrier':{capacity:10,terminators:false,powerArmour:true},
+  'Razorback Fire-support Carrier':{capacity:6,terminators:false,powerArmour:true,noGravis:true},
+  'Land Raider':{capacity:12,terminators:true},
+  'Spartan Assault Tank':{capacity:20,terminators:true},
+  'Mastodon Heavy Transport':{capacity:30,terminators:true}};
  const spec=table[t.name];if(!spec)return null;
  const desc=(t.abilities||[]).map(a=>a.description||'').join(' ');
  const cap=/capacity:?\s*(\d{1,2})/i.exec(desc);
@@ -169,6 +173,8 @@ function passengerSpaces(p,vehicle){
  const spec=transportSpec(vehicle);
  if(!spec||!p||p.faction!==vehicle.faction||isVehicle(p)||p.special?.daemon||/\b(?:jump|bike|mounted|cavalry|dreadnought|aircraft)\b/i.test(p.name+' '+(p.category||'')))return null;
  const term=/terminator/i.test(p.name+' '+(p.category||''));
+ if(spec.powerArmour&&!p.special?.fnp)return null; // Mortals and auxiliaries have no power armour/Serum.
+ if(spec.noGravis&&/gravis/i.test(p.name+' '+(p.category||'')))return null;
  if((term&&!spec.terminators)||!Number.isInteger(p.models)||p.models<1||p.models>30)return null;
  return p.models*(term?2:1);
 }
