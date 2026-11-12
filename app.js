@@ -26,11 +26,11 @@ function tab(name){
 function message(text,isError=false){state.feedback=text;state.feedbackError=isError;const box=$('battle-feedback');box.textContent=text;box.classList.toggle('error',isError);}
 function phaseLabel(phase){return ({movement:'Movement',shooting:'Shooting',charge:'Charge',fight:'Fight',finished:'Concluded'})[phase]||phase;}
 function renderScore(){
- const g=state.game,player=E.living(g,'player'),enemy=E.living(g,'enemy'),playerReserves=E.reserveUnits(g,'player'),enemyReserves=E.reserveUnits(g,'enemy');
+ const g=state.game,player=E.living(g,'player'),enemy=E.living(g,'enemy'),playerReserves=E.reserveUnits(g,'player'),enemyReserves=E.reserveUnits(g,'enemy'),playerEmbarked=E.embarkedUnits(g,'player'),enemyEmbarked=E.embarkedUnits(g,'enemy');
  const pTotal=E.total(state.musters.player),eTotal=E.total(state.musters.enemy);
- $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} field / ${playerReserves.length} reserve · ${pTotal} pts</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
+ $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} field / ${playerReserves.length} reserve / ${playerEmbarked.length} embarked · ${pTotal} pts</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
  <div class="score center"><div class="score-title">BATTLE ROUND ${Math.min(g.round,E.MAX_ROUNDS)} / ${E.MAX_ROUNDS}</div><div class="metric">${phaseLabel(g.phase)}</div><div class="score-sub">${g.finished?(g.winner==='draw'?'DRAW':(g.winner==='player'?'FRIENDLY':'OPPOSING')+' VICTORY'):'Your turn'}</div></div>
- <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} field / ${enemyReserves.length} reserve · ${eTotal} pts</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
+ <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} field / ${enemyReserves.length} reserve / ${enemyEmbarked.length} embarked · ${eTotal} pts</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
 }
 function isTargetable(attacker,target){
  const g=state.game;
@@ -49,7 +49,7 @@ function renderBoard(){
  const cells=[];
  for(let y=0;y<E.HEIGHT;y++)for(let x=0;x<E.WIDTH;x++){
    const key=`${x},${y}`,u=occupantMap.get(key),o=objMap.get(key),isWall=E.WALLS.has(key),isCover=E.COVER.has(key);
-   const move=state.placement?E.canDeployReserve(g,g.units.find(q=>q.uid===state.placement.unitUid),x,y,{invoker:state.placement.kind==='invocation'?g.units.find(q=>q.uid===state.placement.thrallsUid):null}):selected&&selected.side==='player'&&g.phase==='movement'&&!u&&E.canMove(g,selected.uid,x,y);
+   const move=state.placement?(state.placement.kind==='disembark'?E.canDisembark(g,g.units.find(q=>q.uid===state.placement.unitUid),x,y):E.canDeployReserve(g,g.units.find(q=>q.uid===state.placement.unitUid),x,y,{invoker:state.placement.kind==='invocation'?g.units.find(q=>q.uid===state.placement.thrallsUid):null})):selected&&selected.side==='player'&&g.phase==='movement'&&!u&&E.canMove(g,selected.uid,x,y);
    const attack=selected&&u&&isTargetable(selected,u);
    const cls=['cell',isWall?'blocked':'',isCover?'cover':'',move?'reachable':'',attack?'attackable':'',selected&&u?.uid===selected.uid?'selected':''].filter(Boolean).join(' ');
    let unitMarkup='';
@@ -81,14 +81,21 @@ function renderInspector(){
 }
 function renderReserves(){
  const el=$('reserves-panel');if(!el)return;
- const g=state.game,waiting=E.reserveUnits(g,'player');
- const canAct=!g.finished&&g.phase==='movement'&&g.active==='player'&&g.round>=2;
+ const g=state.game,waiting=E.reserveUnits(g,'player'),cargo=E.embarkedUnits(g,'player');
+ const canAct=!g.finished&&g.phase==='movement'&&g.active==='player';
  const invokers=E.living(g,'player').filter(u=>E.template(u).name==='Bloodmarked Thralls'&&!u.battleshocked);
- el.innerHTML=waiting.length?waiting.map(u=>{
-  const name=html(E.template(u).name),canInvoke=canAct&&name==='Bloodletters'&&invokers.length&&!g.invocationUsed?.player;
-  return `<div class="reserve-unit"><strong>${name}</strong><div class="reserve-unit-buttons"><button type="button" class="tiny-button" data-deploy-reserve="${html(u.uid)}" ${!canAct?'disabled':''}>Deploy from edge</button>${canInvoke?invokers.map(t=>`<button type="button" class="tiny-button" data-invoke-reserve="${html(u.uid)}" data-invoker="${html(t.uid)}">Invoke via Thralls ${html(t.uid)}</button>`).join(''):''}</div></div>`;
- }).join(''):'<p class="muted">No friendly units are in Reserves.</p>';
- el.innerHTML+=(g.invocationUsed?.player?'<p class="muted">Bloodletter Invocation used this battle.</p>':'')+(state.placement?'<button type="button" class="tiny-button" id="cancel-placement">Cancel placement</button>':'');
+ const reserves=waiting.length?waiting.map(u=>{
+  const name=html(E.template(u).name),canDeploy=canAct&&g.round>=2,canInvoke=canDeploy&&name==='Bloodletters'&&invokers.length&&!g.invocationUsed?.player;
+  return `<div class="reserve-unit"><strong>${name}</strong><div class="reserve-unit-buttons"><button type="button" class="tiny-button" data-deploy-reserve="${html(u.uid)}" ${!canDeploy?'disabled':''}>Deploy from edge</button>${canInvoke?invokers.map(t=>`<button type="button" class="tiny-button" data-invoke-reserve="${html(u.uid)}" data-invoker="${html(t.uid)}">Invoke via Thralls ${html(t.uid)}</button>`).join(''):''}</div></div>`;
+ }).join(''):'<p class="muted">No friendly units in Reserves.</p>';
+ const passengers=cargo.length?cargo.map(u=>{
+  const vehicle=g.units.find(v=>v.uid===u.transportUid);
+  const enabled=canAct&&vehicle?.models>0&&vehicle.deployment==='field'&&!vehicle.moved;
+  return `<div class="reserve-unit"><strong>${html(E.template(u).name)}</strong><p class="muted">Embarked in ${html(vehicle?E.template(vehicle).name:'missing transport')}</p><button type="button" class="tiny-button" data-disembark="${html(u.uid)}" ${!enabled?'disabled':''}>Disembark</button></div>`;
+ }).join(''):'';
+ el.innerHTML=reserves+(passengers?'<p class="eyebrow" style="margin-top:12px">EMBARKED PASSENGERS</p>'+passengers:'')+
+  (g.invocationUsed?.player?'<p class="muted">Bloodletter Invocation already used.</p>':'')+
+  (state.placement?'<button type="button" class="tiny-button" id="cancel-placement">Cancel placement</button>':'');
 }
 function renderObjectives(){
  const g=state.game;
@@ -104,7 +111,7 @@ function renderBattle(){
  if(state.selected&&!E.living(g).some(u=>u.uid===state.selected))state.selected=null;
  renderScore();renderBoard();renderInspector();renderReserves();renderObjectives();renderFeed();
  const instructions={movement:'Move each selected friendly unit once. Green tiles are reachable.',shooting:'Select a friendly shooter, then click an enemy in range. Orange tiles are legal targets.',charge:'Select a friendly unit, then click an enemy to attempt a 2D6 charge.',fight:'Select a friendly unit and click an adjacent enemy to strike.',finished:'Battle complete. Restart, edit your armies, or export the report.'};
- $('phase-hint').textContent=state.placement?'Choose a highlighted square for '+(state.placement.kind==='invocation'?'Bloodletter Invocation.':'Reserve arrival.')+' Select Cancel to exit.':instructions[g.phase];
+ $('phase-hint').textContent=state.placement?'Choose a highlighted square for '+(state.placement.kind==='invocation'?'Bloodletter Invocation.':state.placement.kind==='disembark'?'Disembarkation.':'Reserve arrival.')+' Select Cancel to exit.':instructions[g.phase];
  $('next-phase').disabled=g.finished;$('next-phase').textContent=g.phase==='fight'?'End turn →':'Next phase →';
  $('auto-finish').disabled=g.finished;
  message(state.feedback,state.feedbackError);
@@ -116,11 +123,10 @@ function clickedCell(x,y){
   const plan=state.placement;
   const unit=g.units.find(q=>q.uid===plan.unitUid);
   const invoker=plan.kind==='invocation'?g.units.find(q=>q.uid===plan.thrallsUid):null;
-  if(!E.canDeployReserve(g,unit,x,y,{invoker})){
-   message('Illegal position. Select a highlighted, unoccupied square.',true);renderBattle();return;
-  }
-  const res=plan.kind==='invocation'?E.invokeBloodletters(g,plan.thrallsUid,plan.unitUid,x,y):E.deployReserve(g,plan.unitUid,x,y);
-  message(res.ok?(plan.kind==='invocation'?'Paid Bloodletters invoked from Reserves.':'Reserve unit arrived.'):res.message,!res.ok);
+  const legal=plan.kind==='disembark'?E.canDisembark(g,unit,x,y):E.canDeployReserve(g,unit,x,y,{invoker});
+  if(!legal){message('Illegal position. Select a highlighted, unoccupied square.',true);renderBattle();return;}
+  const res=plan.kind==='disembark'?E.disembark(g,plan.unitUid,x,y):plan.kind==='invocation'?E.invokeBloodletters(g,plan.thrallsUid,plan.unitUid,x,y):E.deployReserve(g,plan.unitUid,x,y);
+  message(res.ok?(plan.kind==='invocation'?'Paid Bloodletters invoked from Reserves.':plan.kind==='disembark'?'Passengers disembarked.':'Reserve unit arrived.'):res.message,!res.ok);
   if(res.ok)state.placement=null;renderBattle();return;
  }
  if(u?.side==='player'){state.selected=u.uid;message(`Selected ${tFor(u).name}.`);renderBattle();return;}
@@ -216,10 +222,16 @@ function renderBuilder(){
   const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
   return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
  ${state.musters[s].length?state.musters[s].map((id,i)=>{const t=E.BY_ID[id],base=E.BY_ID[t?.baseId]||t,stale=!!(t?.baseId&&t.sourceVersion!==base?.sourceVersion);
-  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option></select></label></span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
+  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option>${state.musters[s].flatMap((vehicleId,j)=>{
+ const carrier=E.BY_ID[vehicleId],space=j===i?null:E.passengerSpaces(t,carrier);
+ return space!==null&&E.transportSpec(carrier)?[`<option value="embark:${j}" ${state.deployment[s][i]==='embark:'+j?'selected':''}>Embark: ${html(carrier.name)} #${j+1} (${space} spaces)</option>`]:[];
+}).join('')}</select></label></span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
  }).join(''):'<p class="muted">No units selected.</p>'}</div>`;
  }).join('') + ['player','enemy'].flatMap(s=>E.musterProblems(state.musters[s]).map(err=>`<p class="muster-rule-warning" role="alert">${s==='player'?'Friendly':'Opposing'}: ${html(err)}</p>`)).join('');
- $('apply-musters').disabled=!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;})||E.musterProblems(state.musters[s]).length>0);
+ let transportError=null;
+ try{E.normalizeDeployment(state.deployment,state.musters);}catch(e){transportError=e.message;}
+ if(transportError)$('muster-list').innerHTML+='<p class="muster-rule-warning" role="alert">Deployment: '+html(transportError)+'</p>';
+ $('apply-musters').disabled=!!transportError||!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;})||E.musterProblems(state.musters[s]).length>0);
 }
 function showSyncStatus(status,detail){
  const el=$('catalogue-sync-status'),desc=$('catalogue-sync-detail');
@@ -256,7 +268,12 @@ function addUnit(id){
  if(errors.length){showSyncStatus('Roster limit reached',errors[0]);return;}
  arr.push(id);state.deployment[state.editor].push('field');renderBuilder();
 }
-function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);state.deployment[side].splice(i,1);state.configEditor=null;renderBuilder();}
+function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);state.deployment[side].splice(i,1);
+ state.deployment[side]=state.deployment[side].map(mode=>{
+  if(!mode.startsWith('embark:'))return mode;
+  const target=Number(mode.slice(7));return target===i?'field':target>i?'embark:'+(target-1):mode;
+ });
+ state.configEditor=null;renderBuilder();}
 function renderLab(){
  $('lab-muster-label').textContent=`Friendly ${E.total(state.musters.player)} pts / ${state.musters.player.length} units · Opposing ${E.total(state.musters.enemy)} pts / ${state.musters.enemy.length} units`;
  const r=state.lab;if(!r)return;
@@ -290,8 +307,8 @@ function bind(){
  $('new-battle').addEventListener('click',resetBattle);
  $('reserves-panel').addEventListener('click',ev=>{
   if(ev.target.closest('#cancel-placement')){state.placement=null;renderBattle();return;}
-  const inv=ev.target.closest('[data-invoke-reserve]'),reg=ev.target.closest('[data-deploy-reserve]');
-  if(inv||reg){state.placement={kind:inv?'invocation':'reserve',unitUid:inv?.dataset.invokeReserve||reg?.dataset.deployReserve,thrallsUid:inv?.dataset.invoker||null};state.selected=null;message('Choose a highlighted empty square.');renderBattle();}
+  const inv=ev.target.closest('[data-invoke-reserve]'),reg=ev.target.closest('[data-deploy-reserve]'),dis=ev.target.closest('[data-disembark]');
+  if(inv||reg||dis){state.placement={kind:dis?'disembark':inv?'invocation':'reserve',unitUid:dis?.dataset.disembark||inv?.dataset.invokeReserve||reg?.dataset.deployReserve,thrallsUid:inv?.dataset.invoker||null};state.selected=null;message('Choose a highlighted empty square.');renderBattle();}
  });
  $('save-game').addEventListener('click',save);$('load-game').addEventListener('click',load);$('export-game').addEventListener('click',exportJson);$('download-log').addEventListener('click',exportLog);
  $('import-game').addEventListener('click',()=>$('import-file').click());
@@ -319,7 +336,13 @@ function bind(){
  });
  $('muster-list').addEventListener('change',ev=>{
  const dep=ev.target.closest('[data-deploy-side]');
- if(dep){state.deployment[dep.dataset.deploySide][Number(dep.dataset.deployIndex)]=dep.value;renderBuilder();return;}
+ if(dep){
+   const side=dep.dataset.deploySide,i=Number(dep.dataset.deployIndex),prior=state.deployment[side][i];
+   state.deployment[side][i]=dep.value;
+   try{E.normalizeDeployment(state.deployment,state.musters);}
+   catch(e){state.deployment[side][i]=prior;showSyncStatus('Invalid transport manifest',e.message);}
+   renderBuilder();return;
+  }
  const sel=ev.target.closest('[data-config-kind]');
  if(sel)updateConfiguration(sel.dataset.configSide,Number(sel.dataset.configIndex),sel.dataset.configKind,sel.value,sel.dataset.configSlot);
 });
