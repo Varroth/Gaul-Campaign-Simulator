@@ -156,16 +156,44 @@ function musterProblems(ids){
 
 // Deployment settings use roster indices, since squads with the same datasheet
 // may be purchased separately. Missing settings preserve old battles exactly.
+// Only source-identified ground carriers are supported in the first transport pass.
+function transportSpec(t){
+ if(!t||t.source!=='linked'||t.faction!=='IW')return null;
+ const table={'Rhino Carrier':{capacity:10,terminators:false},'Land Raider':{capacity:12,terminators:true},'Mastodon Heavy Transport':{capacity:30,terminators:true}};
+ const spec=table[t.name];if(!spec)return null;
+ const desc=(t.abilities||[]).map(a=>a.description||'').join(' ');
+ const cap=/capacity:?\s*(\d{1,2})/i.exec(desc);
+ return cap&&Number(cap[1])===spec.capacity?{...spec,name:t.name}:null;
+}
+function passengerSpaces(p,vehicle){
+ const spec=transportSpec(vehicle);
+ if(!spec||!p||p.faction!==vehicle.faction||isVehicle(p)||p.special?.daemon||/\b(?:jump|bike|mounted|cavalry|dreadnought|aircraft)\b/i.test(p.name+' '+(p.category||'')))return null;
+ const term=/terminator/i.test(p.name+' '+(p.category||''));
+ if((term&&!spec.terminators)||!Number.isInteger(p.models)||p.models<1||p.models>30)return null;
+ return p.models*(term?2:1);
+}
 function normalizeDeployment(raw,musters){
  const result={player:[],enemy:[]};
  for(const side of ['player','enemy']){
   const entries=raw?.[side]||[];
-  if(!Array.isArray(entries)||entries.length>musters[side].length)throw Error('Invalid reserves declaration.');
+  if(!Array.isArray(entries)||entries.length>musters[side].length)throw Error('Invalid deployment plan.');
   result[side]=musters[side].map((id,i)=>{
    const mode=entries[i]||'field';
-   if(mode!=='field'&&mode!=='reserve')throw Error('Unsupported deployment mode for unit '+(i+1)+'.');
+   if(!['field','reserve'].includes(mode)&&!/^embark:\d+$/.test(mode))throw Error('Unsupported deployment of unit '+(i+1)+'.');
    return mode;
   });
+  const usage=new Map();
+  for(let i=0;i<result[side].length;i++){
+   const mode=result[side][i];if(!mode.startsWith('embark:'))continue;
+   const target=Number(mode.slice(7));
+   if(target===i||target<0||target>=musters[side].length||result[side][target]!=='field')
+    throw Error('Embarkation requires a separately purchased carrier already on the battlefield.');
+   const vehicle=BY_ID[musters[side][target]],passenger=BY_ID[musters[side][i]];
+   const spec=transportSpec(vehicle),space=passengerSpaces(passenger,vehicle);
+   if(!spec||space===null)throw Error((passenger?.name||'Passenger')+' is ineligible to board '+(vehicle?.name||'carrier')+'.');
+   usage.set(target,(usage.get(target)||0)+space);
+   if(usage.get(target)>spec.capacity)throw Error(vehicle.name+' is overloaded ('+usage.get(target)+' / '+spec.capacity+' spaces).');
+  }
  }
  return result;
 }
@@ -227,7 +255,9 @@ function createGame(options={}){
     used.add(key(pos.x,pos.y));
    }
    const t=BY_ID[id];game.units.push({uid:side[0]+i,template:id,side,
-    x:pos?.x??-1,y:pos?.y??-1,deployment:mode,models:t.models,injury:0,
+    x:pos?.x??-1,y:pos?.y??-1,deployment:mode.startsWith('embark:')?'embarked':mode,
+    transportUid:mode.startsWith('embark:')?side[0]+Number(mode.slice(7)):null,
+    models:t.models,injury:0,
     leaderAlive:!!t.leader,leaderInjury:0,control:'controlled',
     battleshocked:false,moved:false,shot:false,charged:false,fought:false});
   });
@@ -241,6 +271,29 @@ function template(u){return BY_ID[u.template];}
 function living(game,side){return game.units.filter(u=>u.models>0&&(u.deployment===undefined||u.deployment==='field')&&(!side||u.side===side));}
 function activeForces(game,side){return game.units.filter(u=>u.models>0&&(!side||u.side===side));}
 function reserveUnits(game,side){return game.units.filter(u=>u.models>0&&u.deployment==='reserve'&&(!side||u.side===side));}
+function embarkedUnits(game,side){return game.units.filter(u=>u.models>0&&u.deployment==='embarked'&&(!side||u.side===side));}
+function canDisembark(g,passenger,x,y){
+ if(!passenger||passenger.deployment!=='embarked'||passenger.side!==g.active||g.finished||g.phase!=='movement')return false;
+ const vehicle=living(g,passenger.side).find(v=>v.uid===passenger.transportUid);
+ return !!vehicle&&!vehicle.moved&&distance(vehicle,{x,y})===1&&validCell(x,y)&&!living(g).some(v=>v.x===x&&v.y===y);
+}
+function disembark(g,uid,x,y){
+ const u=embarkedUnits(g,g.active).find(u=>u.uid===uid);
+ if(!canDisembark(g,u,x,y))return {ok:false,message:'Select an empty adjacent square beside a stationary transport during Movement.'};
+ u.deployment='field';u.transportUid=null;u.x=x;u.y=y;u.disembarked=true;
+ writeLog(g,template(u).name+' disembarked at '+(x+1)+','+(y+1)+'.');
+ return {ok:true,uid,x,y};
+}
+function emergencyDisembark(g,carrier){
+ for(const u of [...embarkedUnits(g,carrier.side)].filter(v=>v.transportUid===carrier.uid)){
+  const spots=[[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dy])=>({x:carrier.x+dx,y:carrier.y+dy}));
+  const point=spots.find(p=>validCell(p.x,p.y)&&!living(g).some(v=>v.x===p.x&&v.y===p.y));
+  if(point){u.x=point.x;u.y=point.y;u.deployment='field';u.transportUid=null;u.moved=true;u.battleshocked=true;
+   writeLog(g,template(u).name+' made a simplified emergency disembarkation.');}
+  else{u.models=0;writeLog(g,template(u).name+' was lost inside a destroyed transport.');}
+ }
+}
+
 function status(u){const t=template(u);
  const maxHp=t.leader&&t.bodyguardModels?t.bodyguardModels*t.wp+t.leader.wp:t.models*t.wp;
  const leaderUp=!!t.leader&&(u.leaderAlive!==false);
@@ -549,7 +602,7 @@ function attack(g,attackerId,targetId,mode){
      if(b.injury>=wp){
       const veteran=bt.name==='Varroth'&&!b.veteranSaveUsed;
       if(veteran){b.veteranSaveUsed=true;if(d6(g)>=5){b.injury=wp-1;writeLog(g,'Varroth survived a fatal blow (Veteran of Diesor II).');continue;}}
-      b.models--;b.injury=0;casualties++;
+      b.models--;b.injury=0;casualties++;if(b.models===0&&transportSpec(bt))emergencyDisembark(g,b);
      }
     }
    }
@@ -727,11 +780,16 @@ function validateLoadedState(g){
  if(!g||g.version!==2||!Array.isArray(g.units)||g.units.length>28||!g.units.length||!g.score||!Array.isArray(g.log)||!Array.isArray(g.objectives)||g.objectives.length!==3)throw Error('Incompatible save file.');
  if(g.objectives.some(o=>!['A','B','C'].includes(o.id)||!validCell(o.x,o.y)))throw Error('Save file contains invalid objectives.');
  if(g.units.some(u=>!BY_ID[u.template]||!['player','enemy'].includes(u.side)||
-  (u.deployment==='reserve'?(u.x!==-1||u.y!==-1):!validCell(u.x,u.y))||
-  (u.deployment!==undefined&&!['field','reserve'].includes(u.deployment))||
+  (['reserve','embarked'].includes(u.deployment)?((u.x!==-1||u.y!==-1)&&u.models>0):!validCell(u.x,u.y))||
+  (u.deployment!==undefined&&!['field','reserve','embarked'].includes(u.deployment))||
   !Number.isInteger(u.models)||u.models<0||u.models>BY_ID[u.template].models||!Number.isInteger(u.injury)||u.injury<0||u.injury>=BY_ID[u.template].wp))throw Error('Save file contains invalid unit data.');
  if(g.invocationUsed!==undefined&&(!g.invocationUsed||typeof g.invocationUsed.player!=='boolean'||typeof g.invocationUsed.enemy!=='boolean'))throw Error('Save contains invalid Bloodletter Invocation state.');
  if(g.settings.deployment)normalizeDeployment(g.settings.deployment,{player:g.settings.player,enemy:g.settings.enemy});
+ for(const u of g.units.filter(v=>v.deployment==='embarked'&&v.models>0)){
+  const carrier=g.units.find(v=>v.uid===u.transportUid);
+  if(!carrier||carrier.side!==u.side||carrier.models<=0||!transportSpec(template(carrier)))
+   throw Error('Save has an invalid embarked passenger.');
+ }
  if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
  if(g.units.filter(u=>u.models>0).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
@@ -752,5 +810,5 @@ function validateLoadedState(g){
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,embarkedUnits,canDisembark,disembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });
