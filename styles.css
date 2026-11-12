@@ -47,3 +47,10 @@
 .muster-editor .muted{margin:0}
 
 .muster-rule-warning{border:1px solid #b76654;background:rgba(168,67,46,.13);color:#f5ccba;border-radius:6px;padding:9px 12px;font-size:12px;margin:10px 0}
+
+/* Purchased Reserves and source-grounded Invocation */
+.reserve-unit{padding:9px 0;border-bottom:1px solid #36434b;font-size:12px}
+.reserve-unit-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.reserve-unit-buttons button:disabled{opacity:.45;cursor:not-allowed}
+.deployment-select{display:inline-flex;gap:4px;align-items:center;margin-left:8px;color:#b5c6cd;font-size:11px}
+.deployment-select select{font-size:11px;max-width:104px;padding:4px;background:#152129;color:#dce5e6}
