@@ -1,4 +1,4 @@
-"""Source-anchored roster restriction audit for Alpha 0.7.
+"""Source-anchored roster restriction audit, expanded for five first-pass units in Alpha 0.8.3.
 
 Reads only the user-owned New Recruit XML in a GitHub Actions checkout.
 Asserts a handful of explicitly verified *source structures*, not complete
@@ -51,14 +51,24 @@ def main():
     character_names={c.get('name') for c in characters}
     for name in ('Varroth','Orvath Krail','Balan Bannon','Infernal Chaplain','Infernal Terminator Chaplain'):
         if name not in character_names:failures[name]='Missing source leader'
-    for name,term in [('Despoiler Cadre',r'one model per 5 may take power weapon'),
-                       ('Chainbound Reavers',r'for every full five models, one Reaver may replace autopistol with a hand flamer')]:
-        if not re.search(term,rules.get(name,''),flags=re.I):failures[name]='Source weapon quota text changed'
+    first_five=[
+        ('Bloodmarked Thralls',r'for every full 10 models,? one model\b[^.]*\bflamer or heavy stubber','1 flamer/heavy stubber per full 10'),
+        ('Chainbound Reavers',r'for every full five models,? one Reaver may replace autopistol with a hand flamer','1 hand flamer per full 5'),
+        ('Infernal Berzerkers',r'one plasma pistol per 5 models','1 plasma pistol per full 5'),
+        ('Despoiler Cadre',r'one model per (?:full )?5 may take power weapon','1 power weapon per full 5'),
+        ('Void Breachers',r'one in five may exchange breacher gun for flamer or meltagun','1 flamer/meltagun per full 5'),
+    ]
+    checked=[]
+    for name,term,quota in first_five:
+        matched=bool(re.search(term,rules.get(name,''),flags=re.I))
+        checked.append({'unit':name,'quota':quota,'wordingConfirmed':matched,'verification':'PARTIAL'})
+        if not matched:failures[name]='Source weapon quota wording changed; review needed'
+
     profiles=[p for p in xml.iter() if local(p)=='profile' and p.get('typeName')=='Weapon']
     traits=Counter((c.text or '').strip() for p in profiles for c in p.iter() if local(c)=='characteristic' and c.get('name')=='Traits')
     audit={'revision':xml.get('revision'),'rootUnits':len(units),'sourceLeaders':len(characters),
            'rootUnitsWithCaps':sum(v is not None for v in caps.values()),
-           'criticalLimits':expected,'recognizedTraits':{t:sum(t.lower() in x.lower() for x in traits) for t in ('Torrent','Rapid Fire','Heavy','Twin-linked','Sustained Hits','Melta')},
+           'criticalLimits':expected,'firstFiveWargearQuotas':checked,'recognizedTraits':{t:sum(t.lower() in x.lower() for x in traits) for t in ('Torrent','Rapid Fire','Heavy','Twin-linked','Sustained Hits','Melta')},
            'unmodeledRules':['nested equipment conditions','enhancements/detachment costs','leader auras','Lost Cohort control','indirect fire','Hazardous','Precision','psychic abilities']}
     print('IW_ROSTER_RULE_AUDIT',json.dumps(audit,ensure_ascii=False))
     if len(units)!=74:failures['rootUnits']=f'Expected 74, got {len(units)}'

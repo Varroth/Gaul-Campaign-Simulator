@@ -132,6 +132,7 @@ function showConfig(side,index){
  const select=(label,kind,slotId,choices,selected)=>`<label>${html(label)}<select data-config-kind="${kind}" data-config-side="${side}" data-config-index="${index}" ${slotId?`data-config-slot="${html(slotId)}"`:''}>${opts(choices,selected)}</select></label>`;
  return `<div class="muster-editor" role="group" aria-label="Configure ${html(base.name)}">
  <p class="muted">Selections follow the published squad-size options and flat weapon menus. Unimplemented restrictions or abilities still require New Recruit validation.</p>
+ ${base.wargearLimits?.length?`<p class="muted">Source-enforced wargear quotas: ${base.wargearLimits.map(x=>html(x.description)).join(" · ")}</p>`:""}
  ${select('Squad size','formation',null,base.formationConfigs.map(f=>({...f,label:`${f.label}`})),form.id)}
  <div class="gear-editor">${form.slots.map(slot=>select(slot.name,'gear',slot.id,slot.choices,gear[slot.id]||slot.selectedId)).join('')}</div>
  ${!base.special?.mandatoryChaplain&&leaderOptions.length?select('Attached Leader (paid once)','leader',null,[{id:'',label:'None',points:0},...leaderOptions.map(x=>({...x,label:x.name}))],t.leaderId||''):''}
