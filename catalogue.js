@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.8.3';
+const RULESET_VERSION='alpha-0.9';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';

@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.8.3 (five-unit wargear quota audit)
+# Gaul Campaign Simulator — Alpha 0.9 (paid Reserves, Invocation and ground transports)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 
@@ -82,3 +82,7 @@ The simulator CI workflow checks out the current New Recruit source read-only an
 ## Alpha 0.8.2 results
 
 A full source-structure pass now audits all 74 Infernal Warriors root datasheets and 22 Leader-type character entries, reporting individual blockers as a downloadable GitHub Actions artifact. The combat engine also resolves the source's common variable attack and damage dice expressions (D3, D6, 2D6 and D6+N) and checks wall obstruction for ranged attacks. This is **partial implementation**, not full rules parity: no units are promoted to Verified. The parsed catalogue cache version is bumped so previously synced units are rebuilt with the new audit blockers after a successful refresh.
+
+## Alpha 0.9: Reserves and ground transports
+
+The Army Builder now supports paid Reserve declarations and supported ground-carrier assignments. On the battlefield, units can enter from legal reserve squares, purchased Bloodletters can be invoked once via eligible Bloodmarked Thralls, and passengers can disembark from supported carriers. The automated AI and Battle Lab also use simplified reserve/ground transport procedures. See [Reserves & Transport Implementation](docs/RESERVES_TRANSPORTS_V9.md) for precise limits and unimplemented mission-specific rules. All units remain **Synced**, not fully **Verified**.

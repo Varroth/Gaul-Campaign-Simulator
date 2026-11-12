@@ -41,6 +41,8 @@ jobs:
         run: python scripts/audit_roster_rules.py upstream/Infernal_Warriors.cat
       - name: Audit named Infernal Warriors source abilities and combat coverage
         run: python scripts/audit_abilities.py upstream/Infernal_Warriors.cat
+      - name: Audit source transport capacities and Bloodletter Invocation
+        run: python scripts/audit_transport_reserves.py upstream/Infernal_Warriors.cat
       - name: Generate 74-unit source audit
         run: python scripts/audit_unit_matrix.py upstream/Infernal_Warriors.cat --out verification-artifacts
       - name: Upload individual unit verification report
