@@ -154,31 +154,93 @@ function musterProblems(ids){
  return [...new Set(errors)];
 }
 
+// Deployment settings use roster indices, since squads with the same datasheet
+// may be purchased separately. Missing settings preserve old battles exactly.
+function normalizeDeployment(raw,musters){
+ const result={player:[],enemy:[]};
+ for(const side of ['player','enemy']){
+  const entries=raw?.[side]||[];
+  if(!Array.isArray(entries)||entries.length>musters[side].length)throw Error('Invalid reserves declaration.');
+  result[side]=musters[side].map((id,i)=>{
+   const mode=entries[i]||'field';
+   if(mode!=='field'&&mode!=='reserve')throw Error('Unsupported deployment mode for unit '+(i+1)+'.');
+   return mode;
+  });
+ }
+ return result;
+}
+// Each grid cell represents approximately 2 inches. Ordinary reserves enter
+// from the friendly board edge from round 2 and must be more than 9 inches
+// from enemies. Individual missions may impose further restrictions.
+function canDeployReserve(g,unit,x,y,{invoker=null}={}){
+ if(!unit||unit.models<=0||unit.deployment!=='reserve'||unit.side!==g.active||
+    g.finished||g.phase!=='movement'||g.round<2||!validCell(x,y)||
+    living(g).some(u=>u.x===x&&u.y===y))return false;
+ if(living(g,unit.side==='player'?'enemy':'player').some(u=>distance(u,{x,y})<=4))return false;
+ if(invoker)return invoker.side===unit.side&&invoker.models>0&&invoker.deployment==='field'&&
+   !invoker.battleshocked&&distance(invoker,{x,y})<=3;
+ return unit.side==='player'?x<=1:x>=WIDTH-2;
+}
+function deployReserve(g,uid,x,y){
+ const unit=reserveUnits(g,g.active).find(u=>u.uid===uid);
+ if(!canDeployReserve(g,unit,x,y))return {ok:false,message:'Reserve arrivals require round 2+, the friendly board edge, over 9 inches from enemies and an unoccupied square.'};
+ unit.x=x;unit.y=y;unit.deployment='field';unit.moved=true;unit.advancing=false;
+ writeLog(g,template(unit).name+' arrived from purchased Reserves at '+(x+1)+','+(y+1)+'.');
+ return {ok:true,uid,x,y};
+}
+// Source rule: once per battle PER ARMY, using an already-purchased Bloodletters
+// unit in Reserves. The action does not create, duplicate or discount a unit.
+function invokeBloodletters(g,thrallsUid,bloodlettersUid,x,y){
+ if(g.finished||g.phase!=='movement'||g.round<2)return {ok:false,message:'Invocation needs a legal Movement phase starting in round 2.'};
+ if(g.invocationUsed?.[g.active])return {ok:false,message:'This army has already performed Bloodletter Invocation.'};
+ const invoker=living(g,g.active).find(u=>u.uid===thrallsUid);
+ if(!invoker||template(invoker).name!=='Bloodmarked Thralls'||invoker.battleshocked)
+  return {ok:false,message:'Select an unshocked Bloodmarked Thralls unit on the battlefield.'};
+ const blood=reserveUnits(g,g.active).find(u=>u.uid===bloodlettersUid);
+ if(!blood||template(blood).name!=='Bloodletters'||!template(blood).special?.daemon)
+  return {ok:false,message:'A purchased Bloodletters unit must already be in Reserves.'};
+ if(!canDeployReserve(g,blood,x,y,{invoker}))
+  return {ok:false,message:'Set Bloodletters within 6 inches of Thralls, more than 9 inches from enemies and on an empty square.'};
+ g.invocationUsed=g.invocationUsed||{player:false,enemy:false};
+ blood.x=x;blood.y=y;blood.deployment='field';blood.moved=true;
+ g.invocationUsed[g.active]=true;
+ writeLog(g,'Bloodletter Invocation placed purchased Bloodletters from Reserves (once per army).');
+ return {ok:true,uid:blood.uid,x,y};
+}
 function createGame(options={}){
  const pm=Array.isArray(options.player)?options.player:DEFAULT_PLAYER, em=Array.isArray(options.enemy)?options.enemy:DEFAULT_ENEMY;
  const invalid=[...musterProblems(pm),...musterProblems(em)];
  if(invalid.length)throw Error('Illegal muster: '+invalid[0]);
+ const planned=normalizeDeployment(options.deployment,{player:pm,enemy:em});
  const seed=Number.isFinite(+options.seed)?(+options.seed>>>0):7126;
- const game={version:2,seed,seedState:seed||1,round:1,phase:'movement',active:'player',finished:false,winner:null,score:{player:0,enemy:0},units:[],log:[],objectives:OBJECTIVES.map(o=>({...o})),directed:{player:null,enemy:null},directedUsed:{player:false,enemy:false},settings:{player:[...pm],enemy:[...em]}};
+ const game={version:2,seed,seedState:seed||1,round:1,phase:'movement',active:'player',finished:false,winner:null,score:{player:0,enemy:0},units:[],log:[],objectives:OBJECTIVES.map(o=>({...o})),directed:{player:null,enemy:null},directedUsed:{player:false,enemy:false},invocationUsed:{player:false,enemy:false},settings:{player:[...pm],enemy:[...em],deployment:planned}};
  const used=new Set();
  function place(list,side){
   list.forEach((id,i)=>{
+   const mode=planned[side][i];
    let pos=null;
-   const cols=side==='player'?[0,1,2]:[11,10,9];
-   const orderedRows=[3,5,1,6,2,4,0,7];
-   outer: for(const c of cols)for(const row of orderedRows){if(!used.has(key(c,row))&&validCell(c,row)){pos={x:c,y:row};break outer;}}
-   if(!pos) throw Error('No deployment space remains.');
-   used.add(key(pos.x,pos.y));
-   const t=BY_ID[id];game.units.push({uid:`${side[0]}${i}`,template:id,side,x:pos.x,y:pos.y,models:t.models,injury:0,leaderAlive:!!t.leader,leaderInjury:0,control:'controlled',battleshocked:false,moved:false,shot:false,charged:false,fought:false});
+   if(mode==='field'){
+    const cols=side==='player'?[0,1,2]:[11,10,9];
+    const orderedRows=[3,5,1,6,2,4,0,7];
+    outer: for(const c of cols)for(const row of orderedRows){if(!used.has(key(c,row))&&validCell(c,row)){pos={x:c,y:row};break outer;}}
+    if(!pos)throw Error('No deployment space remains.');
+    used.add(key(pos.x,pos.y));
+   }
+   const t=BY_ID[id];game.units.push({uid:side[0]+i,template:id,side,
+    x:pos?.x??-1,y:pos?.y??-1,deployment:mode,models:t.models,injury:0,
+    leaderAlive:!!t.leader,leaderInjury:0,control:'controlled',
+    battleshocked:false,moved:false,shot:false,charged:false,fought:false});
   });
  }
  place(pm,'player');place(em,'enemy');
  startTurn(game,'player');
- writeLog(game,`Battle started. ${pm.length} friendly and ${em.length} opposing units. Seed ${seed}.`);
+ writeLog(game,'Battle started. '+pm.length+' friendly and '+em.length+' opposing purchased units. Seed '+seed+'.');
  return game;
 }
 function template(u){return BY_ID[u.template];}
-function living(game,side){return game.units.filter(u=>u.models>0&&(!side||u.side===side));}
+function living(game,side){return game.units.filter(u=>u.models>0&&(u.deployment===undefined||u.deployment==='field')&&(!side||u.side===side));}
+function activeForces(game,side){return game.units.filter(u=>u.models>0&&(!side||u.side===side));}
+function reserveUnits(game,side){return game.units.filter(u=>u.models>0&&u.deployment==='reserve'&&(!side||u.side===side));}
 function status(u){const t=template(u);
  const maxHp=t.leader&&t.bodyguardModels?t.bodyguardModels*t.wp+t.leader.wp:t.models*t.wp;
  const leaderUp=!!t.leader&&(u.leaderAlive!==false);
@@ -544,7 +606,7 @@ function scoreTurn(g,side){
  if(awarded)writeLog(g,`${side==='player'?'Friendly':'Opposing'} force scored ${awarded} VP from objectives.`);
 }
 function checkFinished(g){
- const p=living(g,'player').length,e=living(g,'enemy').length;
+ const p=activeForces(g,'player').length,e=activeForces(g,'enemy').length;
  if(!p||!e||g.round>MAX_ROUNDS){
   g.finished=true;g.phase='finished';
   if(!p&&e)g.winner='enemy';else if(!e&&p)g.winner='player';else if(g.score.player>g.score.enemy)g.winner='player';else if(g.score.enemy>g.score.player)g.winner='enemy';else g.winner='draw';
@@ -644,7 +706,12 @@ function battleLab(player,enemy,count=10,seed=1111){
 function validateLoadedState(g){
  if(!g||g.version!==2||!Array.isArray(g.units)||g.units.length>28||!g.units.length||!g.score||!Array.isArray(g.log)||!Array.isArray(g.objectives)||g.objectives.length!==3)throw Error('Incompatible save file.');
  if(g.objectives.some(o=>!['A','B','C'].includes(o.id)||!validCell(o.x,o.y)))throw Error('Save file contains invalid objectives.');
- if(g.units.some(u=>!BY_ID[u.template]||!['player','enemy'].includes(u.side)||!validCell(u.x,u.y)||!Number.isInteger(u.models)||u.models<0||u.models>BY_ID[u.template].models||!Number.isInteger(u.injury)||u.injury<0||u.injury>=BY_ID[u.template].wp))throw Error('Save file contains invalid unit data.');
+ if(g.units.some(u=>!BY_ID[u.template]||!['player','enemy'].includes(u.side)||
+  (u.deployment==='reserve'?(u.x!==-1||u.y!==-1):!validCell(u.x,u.y))||
+  (u.deployment!==undefined&&!['field','reserve'].includes(u.deployment))||
+  !Number.isInteger(u.models)||u.models<0||u.models>BY_ID[u.template].models||!Number.isInteger(u.injury)||u.injury<0||u.injury>=BY_ID[u.template].wp))throw Error('Save file contains invalid unit data.');
+ if(g.invocationUsed!==undefined&&(!g.invocationUsed||typeof g.invocationUsed.player!=='boolean'||typeof g.invocationUsed.enemy!=='boolean'))throw Error('Save contains invalid Bloodletter Invocation state.');
+ if(g.settings.deployment)normalizeDeployment(g.settings.deployment,{player:g.settings.player,enemy:g.settings.enemy});
  if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
  if(g.units.filter(u=>u.models>0).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
@@ -665,5 +732,5 @@ function validateLoadedState(g){
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });
