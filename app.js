@@ -328,7 +328,7 @@ function bind(){
  $('run-lab').addEventListener('click',()=>{
   if(!state.musters.player.length||!state.musters.enemy.length){$('lab-results').textContent='Build both armies first.';return;}
   const seed=Number($('lab-seed').value)||20261110;
-  state.lab=E.battleLab(state.musters.player,state.musters.enemy,10,seed);renderLab();
+  state.lab=E.battleLab(state.musters.player,state.musters.enemy,10,seed,state.deployment);renderLab();
  });
  $('lab-results').addEventListener('click',ev=>{if(ev.target.closest('#export-lab')&&state.lab)download('gaul-campaign-battle-lab.json',JSON.stringify({musters:state.musters,configurations:configuredSpecs(),deployment:state.deployment,results:state.lab},null,2),'application/json');});
 }

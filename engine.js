@@ -614,6 +614,25 @@ function checkFinished(g){
   return true;
  }return false;
 }
+// Automatic battles obey the same arrival geometry as player actions.
+function autoDeployReserves(g,side){
+ if(g.round<2||g.phase!=='movement')return 0;
+ let deployed=0;
+ for(const u of [...reserveUnits(g,side)]){
+  let placed=false;
+  if(template(u).name==='Bloodletters'&&!g.invocationUsed?.[side]){
+   for(const invoker of living(g,side).filter(v=>template(v).name==='Bloodmarked Thralls'&&!v.battleshocked)){
+    for(let y=0;y<HEIGHT&&!placed;y++)for(let x=0;x<WIDTH&&!placed;x++)
+     if(canDeployReserve(g,u,x,y,{invoker})&&invokeBloodletters(g,invoker.uid,u.uid,x,y).ok){deployed++;placed=true;}
+    if(placed)break;
+   }
+  }
+  if(placed)continue;
+  for(const x of (side==='player'?[1,0]:[WIDTH-2,WIDTH-1]))for(let y=0;y<HEIGHT&&!placed;y++)
+   if(canDeployReserve(g,u,x,y)&&deployReserve(g,u.uid,x,y).ok){deployed++;placed=true;}
+ }
+ return deployed;
+}
 function aiTurn(g,side,options={}){
  if(g.finished)return;
  const resume=!!options.resume;
@@ -644,6 +663,7 @@ function aiTurn(g,side,options={}){
   }
  }
  if(begin<=1){
+  if(begin<=0)autoDeployReserves(g,side);
   g.phase='shooting';
   for(const a of [...living(g,side)]){
    if(a.shot)continue;
@@ -695,10 +715,10 @@ function finishByAuto(g){
  }
  return g;
 }
-function battleLab(player,enemy,count=10,seed=1111){
+function battleLab(player,enemy,count=10,seed=1111,deployment=null){
  const results=[],n=clamp(Math.round(count)||10,1,100);
  for(let i=0;i<n;i++){
-  const g=finishByAuto(createGame({player,enemy,seed:(seed+i*7919)>>>0}));
+  const g=finishByAuto(createGame({player,enemy,deployment,seed:(seed+i*7919)>>>0}));
   results.push({game:i+1,seed:g.seed,winner:g.winner,playerVP:g.score.player,enemyVP:g.score.enemy,playerSurvivors:living(g,'player').length,enemySurvivors:living(g,'enemy').length});
  }
  return results;
@@ -732,5 +752,5 @@ function validateLoadedState(g){
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });
