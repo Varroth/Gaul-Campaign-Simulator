@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.8.2 (74-unit audit and variable weapon dice)
+# Gaul Campaign Simulator — Alpha 0.8.3 (five-unit wargear quota audit)
 
 An **unofficial browser-based tactical playtest** for Gaul Campaign: Renegades. The simulator is developed independently of [the source New Recruit army catalogues](https://github.com/Varroth/Gaul-Campaign-Renegades).
 

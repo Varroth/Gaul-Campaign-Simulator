@@ -19,3 +19,19 @@ Full faction rules, conditional source modifiers, transport/embarkation, officia
 The browser permits no more than 14 simulated units per side because of its current 12×8 battlefield, even if a source army could field more models. This is a simulator limit, not a New Recruit rule.
 
 The maintained verification ledger remains empty.
+
+## November 11, 2026 — first-five wargear audit (Alpha 0.8.3)
+
+Source-anchored weapon quotas enforced in the selectable bodyguard loadouts:
+
+| Unit | Enforced limit |
+| --- | --- |
+| Bloodmarked Thralls | One flamer or heavy stubber per full ten models |
+| Chainbound Reavers | One hand flamer per full five models |
+| Infernal Berzerkers | One plasma pistol per full five models |
+| Despoiler Cadre | One power weapon per full five models |
+| Void Breachers | One flamer or meltagun per full five models |
+
+The source XML is independently checked in GitHub Actions. These are partial
+composition audits only; complex nested wargear rules and full combat effects
+are not yet fully verified.

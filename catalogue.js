@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v9';
-const CACHE_VERSION=9;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v10';
+const CACHE_VERSION=10;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.8.2';
+const RULESET_VERSION='alpha-0.8.3';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -61,11 +61,17 @@ function rosterMaximum(unit){
 // family and a count. More complex source modifiers remain New Recruit-only.
 function wargearLimits(unit){
  const p=descendants(unit,'profile').filter(x=>/^(?:Wargear \/ legal alternatives|Unit composition \/ selectable wargear)$/i.test(value(x,'name')));
- const txt=p.map(x=>field(x,'Description')).join(' '); const out=[];
+ const txt=p.map(x=>field(x,'Description')).join(' ');const out=[];
  if(/one model per (?:full )?5 may (?:take|replace[^.]*with) (?:a )?power weapon/i.test(txt))
   out.push({kind:'power',per:5,maximum:1,description:'One power weapon per five models'});
  if(/for every full five models,? one Reaver may replace autopistol with a hand flamer/i.test(txt))
   out.push({kind:'handflamer',per:5,maximum:1,description:'One hand flamer per five models'});
+ if(/one plasma pistol per 5 models/i.test(txt))
+  out.push({kind:'plasmaPistol',per:5,maximum:1,description:'One plasma pistol per five models'});
+ if(/one in five may exchange breacher gun for flamer or meltagun/i.test(txt))
+  out.push({kind:'breacherSpecial',per:5,maximum:1,description:'One flamer or meltagun per five Void Breachers'});
+ if(/for every full 10 models,? one model\b[^.]*\bflamer or heavy stubber/i.test(txt))
+  out.push({kind:'thrallSpecial',per:10,maximum:1,description:'One flamer or heavy stubber per ten Bloodmarked Thralls'});
  return out;
 }
 function enforceWargearLimits(base,modelCount,loadout){
@@ -73,8 +79,12 @@ function enforceWargearLimits(base,modelCount,loadout){
   const limitCount=Math.floor(modelCount/limit.per)*limit.maximum;
   const used=loadout.filter(w=>!w.isLeader&&(
    limit.kind==='power'?/\bpower (?:sword|axe|fist|maul|blade|weapon)\b/i.test(w.name):
-   limit.kind==='handflamer'?/hand flamer/i.test(w.name):false)).reduce((total,w)=>total+w.count,0);
-  if(used>limitCount)throw Error(`${limit.description} (maximum ${limitCount} for this formation; selected ${used}).`);
+   limit.kind==='handflamer'?/hand flamer/i.test(w.name):
+   limit.kind==='plasmaPistol'?/plasma pistol/i.test(w.name):
+   limit.kind==='breacherSpecial'?/\b(?:flamer|meltagun)\b/i.test(w.name):
+   limit.kind==='thrallSpecial'?/\b(?:flamer|heavy stubber)\b/i.test(w.name):false
+  )).reduce((total,w)=>total+w.count,0);
+  if(used>limitCount)throw Error(limit.description+' (maximum '+limitCount+' for this formation; selected '+used+').');
  }
 }
 function minModels(el){
@@ -321,6 +331,8 @@ function fingerprint(unit){
 }
 function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
  if(!unit||unit.source!=='linked')return 'sim-estimate';
+ // Source audit blockers and estimated points cannot be overridden by a ledger entry.
+ if(unit.estimated||unit.audit?.points==='estimate'||unit.auditBlockers?.length)return 'synced';
  const approval=ledger[unit.id];
  if(!approval||!sourceVersion||approval.catalogueSha!==sourceVersion||approval.sourceId!==unit.sourceId||
     approval.rulesetVersion!==RULESET_VERSION||approval.fingerprint!==fingerprint(unit)||

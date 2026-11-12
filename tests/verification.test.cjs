@@ -47,3 +47,12 @@ test('source-specific audit blockers appear in verification details',()=>{
  assert.ok(notes.some(n=>n.includes('Audit blocker')&&n.includes('Nested menus')));
  assert.equal(C.statusFor(p),'synced');
 });
+
+test('source blockers and estimate costs prevent Verified despite a ledger approval',()=>{
+ const incomplete={...linked,auditBlockers:['Unmodeled weapon option']};
+ const p={...approval,fingerprint:C.fingerprint(incomplete)};
+ assert.equal(C.statusFor(incomplete,incomplete.sourceVersion,{[incomplete.id]:p}),'synced');
+ const estimated={...linked,estimated:true,audit:{...linked.audit,points:'estimate'}};
+ const a={...approval,fingerprint:C.fingerprint(estimated)};
+ assert.equal(C.statusFor(estimated,estimated.sourceVersion,{[estimated.id]:a}),'synced');
+});
