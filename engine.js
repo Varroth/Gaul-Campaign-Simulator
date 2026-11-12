@@ -686,6 +686,21 @@ function autoDeployReserves(g,side){
  }
  return deployed;
 }
+// Autonomous transport play uses the same disembark restrictions as the player.
+// Cargo exits on round two if an adjacent tile is clear.
+function autoDisembark(g,side){
+ if(g.round<2||g.phase!=='movement')return 0;
+ let count=0;
+ for(const cargo of [...embarkedUnits(g,side)]){
+  const vehicle=living(g,side).find(v=>v.uid===cargo.transportUid);
+  if(!vehicle)continue;
+  for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+   const x=vehicle.x+dx,y=vehicle.y+dy;
+   if(canDisembark(g,cargo,x,y)&&disembark(g,cargo.uid,x,y).ok){count++;break;}
+  }
+ }
+ return count;
+}
 function aiTurn(g,side,options={}){
  if(g.finished)return;
  const resume=!!options.resume;
@@ -698,6 +713,7 @@ function aiTurn(g,side,options={}){
    if(enemies.length)declareDirectedObjective(g,side,enemies[0].uid);}
  }
  if(begin<=0){
+  autoDisembark(g,side);
   // Movement: seek objectives and nearby threats while respecting obstacles.
   for(const a of living(g,side)){
    if(a.moved)continue;
@@ -810,5 +826,5 @@ function validateLoadedState(g){
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,embarkedUnits,canDisembark,disembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,embarkedUnits,canDisembark,disembark,autoDisembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });
