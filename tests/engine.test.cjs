@@ -17,7 +17,7 @@ test('deployment does not overlap or enter walls',()=>{const g=make({player:Arra
 test('blocked cells cannot contain unit',()=>{assert.equal(E.validCell(4,1),false);assert.equal(E.validCell(7,6),false);});
 test('cannot teleport across battlefield',()=>{const g=make();const u=direct(g);assert.equal(E.canMove(g,u.uid,11,7),false);});
 test('friendly unit can make a legal move then not move again',()=>{const g=make();const u=direct(g);let pos=null;for(let y=0;y<E.HEIGHT&&!pos;y++)for(let x=0;x<E.WIDTH;x++)if(E.canMove(g,u.uid,x,y)){pos={x,y};break;}assert.ok(pos);assert.equal(E.move(g,u.uid,pos.x,pos.y).ok,true);assert.equal(E.move(g,u.uid,pos.x+1,pos.y).ok,false);});
-test('turn phase advances in order',()=>{const g=make();E.advance(g);assert.equal(g.phase,'shooting');E.advance(g);assert.equal(g.phase,'charge');E.advance(g);assert.equal(g.phase,'fight');});
+test('turn phase advances in order',()=>{const g=make();E.advance(g);assert.equal(g.phase,'reinforcements');E.advance(g);assert.equal(g.phase,'shooting');E.advance(g);assert.equal(g.phase,'charge');E.advance(g);assert.equal(g.phase,'fight');});
 test('attacks prohibited outside corresponding combat phase',()=>{const g=make();const p=E.living(g,'player')[0],q=E.living(g,'enemy')[0];assert.equal(E.attack(g,p.uid,q.uid,'ranged').ok,false);});
 test('shooting checks weapon range',()=>{const g=make();g.phase='shooting';const p=E.living(g,'player')[0],q=E.living(g,'enemy')[0];p.x=0;p.y=0;q.x=11;q.y=7;assert.equal(E.attack(g,p.uid,q.uid,'ranged').ok,false);});
 test('shooting executes and cannot repeat same turn',()=>{const g=make({player:['fc-bheulach'],enemy:['ad-armor']});g.phase='shooting';const a=g.units[0],b=g.units[1];a.x=1;a.y=1;b.x=4;b.y=2;const r=E.attack(g,a.uid,b.uid,'ranged');assert.ok(r.ok);assert.ok(r.attacks>0);assert.equal(E.attack(g,a.uid,b.uid,'ranged').ok,false);});
@@ -26,8 +26,8 @@ test('all damage remains within unit wound capacity',()=>{const g=E.finishByAuto
 test('serum regeneration recovers one injury on turn start',()=>{const g=make({player:['iw-varroth'],enemy:['ad-vephar']});const u=g.units[0];u.injury=2;g.phase='fight';E.advance(g);if(!g.finished)assert.equal(u.injury,1);});
 test('one unit cannot charge twice in one phase',()=>{const g=make({player:['iw-berserkers'],enemy:['ad-breach']});const [a,b]=g.units;a.x=1;a.y=2;b.x=4;b.y=2;g.phase='charge';assert.equal(E.charge(g,a.uid,b.uid).ok,true);assert.equal(E.charge(g,a.uid,b.uid).ok,false);});
 test('objective control uses model count and OC',()=>{const g=make({player:['iw-berserkers'],enemy:['ad-vephar']});g.units[0].x=3;g.units[0].y=2;g.units[1].x=11;g.units[1].y=7;assert.equal(E.objectiveOwner(g,g.objectives[0]),'player');});
-test('no objective score in first battle round',()=>{const g=make();for(let i=0;i<4;i++)E.advance(g);assert.equal(g.score.player,0);});
-test('automatic turn runs and returns control to player',()=>{const g=make();for(let i=0;i<4;i++)E.advance(g);assert.ok(g.finished||g.round===2&&g.active==='player'&&g.phase==='movement');});
+test('no objective score in first battle round',()=>{const g=make();for(let i=0;i<5;i++)E.advance(g);assert.equal(g.score.player,0);});
+test('automatic turn runs and returns control to player',()=>{const g=make();for(let i=0;i<5;i++)E.advance(g);assert.ok(g.finished||g.round===2&&g.active==='player'&&g.phase==='movement');});
 test('autobattle terminates within five game rounds',()=>{const g=E.finishByAuto(make());assert.equal(g.finished,true);assert.ok(g.round<=6);assert.ok(['player','enemy','draw'].includes(g.winner));});
 test('batch lab reports ten valid scores',()=>{const r=E.battleLab(E.DEFAULT_PLAYER,E.DEFAULT_ENEMY,10,900);assert.equal(r.length,10);assert.ok(r.every(x=>Number.isInteger(x.playerVP)&&Number.isInteger(x.enemyVP)));});
 test('batch lab replays identically with the same seed',()=>{const f=()=>E.battleLab(E.DEFAULT_PLAYER,E.DEFAULT_ENEMY,10,20261110);assert.deepEqual(f(),f());});

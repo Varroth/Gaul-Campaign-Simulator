@@ -23,7 +23,7 @@ test('round-one reserve entry is rejected and offboard units cannot attack',()=>
  assert.equal(E.attack(g,blood.uid,enemy.uid,'ranged').ok,false);
 });
 test('from round two ordinary reserves arrive at friendly edge, not mid-board',()=>{
- const g=make(),blood=g.units[1];g.round=2;
+ const g=make(),blood=g.units[1];g.round=2;g.phase='reinforcements';
  assert.equal(E.canDeployReserve(g,blood,5,3),false);
  assert.equal(E.canDeployReserve(g,blood,0,0),true);
  assert.equal(E.deployReserve(g,blood.uid,0,0).ok,true);
@@ -31,7 +31,7 @@ test('from round two ordinary reserves arrive at friendly edge, not mid-board',(
  assert.equal(blood.x,0);
 });
 test('Invocation places purchased Bloodletters without adding a free unit',()=>{
- const g=make(),[thralls,blood]=g.units;g.round=2;thralls.x=3;thralls.y=3;
+ const g=make(),[thralls,blood]=g.units;g.round=2;g.phase='reinforcements';thralls.x=3;thralls.y=3;
  const before=g.units.length;
  const res=E.invokeBloodletters(g,thralls.uid,blood.uid,6,3);
  assert.equal(res.ok,true);assert.equal(g.units.length,before);
@@ -39,12 +39,12 @@ test('Invocation places purchased Bloodletters without adding a free unit',()=>{
  assert.equal(blood.deployment,'field');assert.equal(blood.x,6);
 });
 test('Invocation never consumes its use on illegal placement',()=>{
- const g=make(),[thralls,blood]=g.units;g.round=2;thralls.x=8;thralls.y=3;
+ const g=make(),[thralls,blood]=g.units;g.round=2;g.phase='reinforcements';thralls.x=8;thralls.y=3;
  assert.equal(E.invokeBloodletters(g,thralls.uid,blood.uid,9,3).ok,false);
  assert.equal(g.invocationUsed.player,false);
 });
 test('Invocation requires unshocked Thralls and Bloodletters actually in Reserves',()=>{
- const g=make(),[thralls,blood]=g.units;g.round=2;thralls.x=3;thralls.y=3;
+ const g=make(),[thralls,blood]=g.units;g.round=2;g.phase='reinforcements';thralls.x=3;thralls.y=3;
  thralls.battleshocked=true;
  assert.equal(E.invokeBloodletters(g,thralls.uid,blood.uid,6,3).ok,false);
  thralls.battleshocked=false;blood.deployment='field';
@@ -54,7 +54,7 @@ test('one Invocation per army even with two purchased Bloodletters',()=>{
  const group=['iw-thralls',daemon.id,daemon.id,'iw-ashen','iw-ashen'];
  const g=E.createGame({player:group,enemy:['ad-breach'],
  deployment:{player:['field','reserve','reserve','field','field'],enemy:['field']}});
- g.round=2;g.units[0].x=3;g.units[0].y=3;
+ g.round=2;g.phase='reinforcements';g.units[0].x=3;g.units[0].y=3;
  assert.equal(E.invokeBloodletters(g,'p0','p1',6,3).ok,true);
  assert.equal(E.invokeBloodletters(g,'p0','p2',5,4).ok,false);
  assert.equal(E.reserveUnits(g,'player').length,1);
@@ -70,7 +70,7 @@ test('invalid save cannot place offboard reserves onto the map secretly',()=>{
  assert.throws(()=>E.validateLoadedState(bad),/invalid unit data/);
 });
 test('autoplay returns paid reserves to battlefield after round one',()=>{
- const g=make();g.round=2;g.active='player';g.phase='movement';
+ const g=make();g.round=2;g.phase='reinforcements';g.active='player';g.phase='reinforcements';
  E.autoDeployReserves(g,'player');
  assert.equal(E.reserveUnits(g,'player').length,0);
 });

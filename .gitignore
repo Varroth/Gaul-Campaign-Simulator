@@ -6,3 +6,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+verification-artifacts/
+__pycache__/
+.venv/

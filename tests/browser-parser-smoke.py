@@ -19,7 +19,7 @@ body=group('Champion 1 — weapons','champion', [item('Champion with plasma',['p
 for j in range(2,6):body+=group(f'Warrior {j} — weapons',f'warrior{j}',[item('Warrior with bolt pistol',['bolt','chainaxe']).replace('id="Warrior-with-bolt-pistol"',f'id="warrior{j}"')])
 xml=f'''<?xml version="1.0"?><catalogue name="Infernal Warriors" revision="27" xmlns="http://www.battlescribe.net/schema/catalogueSchema"><selectionEntries>{card('Infernal Berzerkers',5,115,body)}</selectionEntries><sharedProfiles>{weapon('plasma','Plasma pistol','12&quot;',1,8,-2,2)}{weapon('bolt','Bolt pistol','12&quot;',2,4,0,1)}{weapon('chainaxe','Chainaxe','Melee',4,5,-1,1)}</sharedProfiles></catalogue>'''
 with sync_playwright() as p:
-    browser=p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+    browser=p.chromium.launch(headless=True,executable_path=__import__('os').environ.get('BROWSER_EXECUTABLE') or __import__('shutil').which('chromium'),args=['--no-sandbox'])
     page=browser.new_page()
     page.set_content('<html><body></body></html>')
     page.add_script_tag(content=(home/'catalogue.js').read_text())

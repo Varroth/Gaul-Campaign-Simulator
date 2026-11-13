@@ -29,7 +29,7 @@ xml=f'''<?xml version="1.0"?><catalogue xmlns="http://www.battlescribe.net/schem
 server=ThreadingHTTPServer(('127.0.0.1',0),partial(SimpleHTTPRequestHandler,directory=str(root)))
 threading.Thread(target=server.serve_forever,daemon=True).start()
 with sync_playwright() as p:
-    browser=p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+    browser=p.chromium.launch(headless=True,executable_path=__import__('os').environ.get('BROWSER_EXECUTABLE') or __import__('shutil').which('chromium'),args=['--no-sandbox'])
     page=browser.new_page(viewport={'width':1280,'height':900})
     errors=[];page.on('pageerror',lambda err:errors.append(str(err)))
     page.set_content(re.sub(r'<script[^>]*src="[^"]+"[^>]*></script>', '', (root/'index.html').read_text()))

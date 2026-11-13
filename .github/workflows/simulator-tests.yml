@@ -2,7 +2,7 @@ name: Simulator Regression Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
   pull_request:
   workflow_dispatch:
 
@@ -25,6 +25,8 @@ jobs:
           node --check engine.js
           node --check catalogue.js
           node --check app.js
+      - name: Install test-only XML parser
+        run: npm ci --ignore-scripts
       - name: Run regression tests
         run: node --test tests/*.test.cjs
       - name: Checkout live New Recruit catalogues (read-only)
@@ -45,11 +47,24 @@ jobs:
         run: python scripts/audit_transport_reserves.py upstream/Infernal_Warriors.cat
       - name: Generate 74-unit source audit
         run: python scripts/audit_unit_matrix.py upstream/Infernal_Warriors.cat --out verification-artifacts
-      - name: Upload individual unit verification report
+      - name: Exercise every imported profile and Infernal equipment branch
+        run: npm run qc:catalogues -- upstream verification-artifacts
+      - name: Install browser test runner
+        run: |
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium
+      - name: Run browser parser, configuration and Chaplain regressions
+        run: |
+          python tests/browser-parser-smoke.py
+          python tests/browser-config-smoke.py
+          python tests/browser-cohort-smoke.py
+      - name: Run desktop, mobile, sync, cache and complete battle checks
+        run: python tests/browser-release-qc.py upstream
+      - name: Upload quality report and browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: infernal-unit-audit
+          name: simulator-quality-report
           path: verification-artifacts/
           if-no-files-found: warn
           retention-days: 30

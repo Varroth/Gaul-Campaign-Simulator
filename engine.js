@@ -63,7 +63,7 @@ function registerLinked(faction,units){
  for(const source of units){
   if(!source||source.faction!==faction||typeof source.id!=='string'||!source.id.startsWith('nr-')||typeof source.name!=='string'||!source.name.trim()||source.name.length>180)continue;
   const t={...source,visible:true};
-  if(!Number.isInteger(t.points)||t.points<1||t.points>3000||!Number.isInteger(t.models)||t.models<1||t.models>20)continue;
+  if(!Number.isInteger(t.points)||t.points<1||t.points>3000||!Number.isInteger(t.models)||t.models<1||t.models>21)continue;
   const existing=BY_ID[t.id];
   if(existing){Object.assign(existing,t);}
   else{TEMPLATES.push(t);BY_ID[t.id]=t;}
@@ -159,11 +159,20 @@ function musterProblems(ids){
 // Only source-identified ground carriers are supported in the first transport pass.
 function transportSpec(t){
  if(!t||t.source!=='linked'||t.faction!=='IW')return null;
- const table={'Rhino Carrier':{capacity:10,terminators:false,powerArmour:true},
+ const table={
+  'Rhino Carrier':{capacity:10,terminators:false,powerArmour:true},
   'Razorback Fire-support Carrier':{capacity:6,terminators:false,powerArmour:true,noGravis:true},
-  'Land Raider':{capacity:12,terminators:true},
+  'Land Raider':{capacity:12,terminators:true,assaultRamp:true},
   'Spartan Assault Tank':{capacity:20,terminators:true},
-  'Mastodon Heavy Transport':{capacity:30,terminators:true}};
+  'Mastodon Heavy Transport':{capacity:30,terminators:true},
+  'Dreadclaw Drop Pod':{capacity:10,terminators:true,landing:true},
+  'Kharybdis Assault Claw':{capacity:20,terminators:true,landing:true},
+  'Terrax Termite Assault Drill':{capacity:10,terminators:false},
+  'Storm Eagle Assault Gunship':{capacity:20,terminators:true},
+  'Stormbird Heavy Assault Ship':{capacity:40,terminators:true},
+  'Stormraven Assault Gunship':{capacity:12,terminators:true,jump:true,externalDreadnought:true},
+  'Thunderhawk Gunship':{capacity:30,terminators:true}
+ };
  const spec=table[t.name];if(!spec)return null;
  const desc=(t.abilities||[]).map(a=>a.description||'').join(' ');
  const cap=/capacity:?\s*(\d{1,2})/i.exec(desc);
@@ -171,12 +180,20 @@ function transportSpec(t){
 }
 function passengerSpaces(p,vehicle){
  const spec=transportSpec(vehicle);
- if(!spec||!p||p.faction!==vehicle.faction||isVehicle(p)||p.special?.daemon||/\b(?:jump|bike|mounted|cavalry|dreadnought|aircraft)\b/i.test(p.name+' '+(p.category||'')))return null;
+ if(!spec||!p||p.faction!==vehicle.faction||p.special?.daemon)return null;
+ if(spec.externalDreadnought&&/^(Contemptor Relic Dreadnought|Helbrute Relic Walker)$/.test(p.name))return 0;
+ if(isVehicle(p)||/\b(?:bike|mounted|cavalry|dreadnought|aircraft)\b/i.test(p.name+' '+(p.category||'')))return null;
  const term=/terminator/i.test(p.name+' '+(p.category||''));
- if(spec.powerArmour&&!p.special?.fnp)return null; // Mortals and auxiliaries have no power armour/Serum.
+ const jump=/jump|raptor/i.test(p.name+' '+(p.category||''));
+ if(jump&&!spec.jump)return null;
+ if(spec.powerArmour&&!p.special?.fnp)return null;
  if(spec.noGravis&&/gravis/i.test(p.name+' '+(p.category||'')))return null;
- if((term&&!spec.terminators)||!Number.isInteger(p.models)||p.models<1||p.models>30)return null;
- return p.models*(term?2:1);
+ if(term&&!spec.terminators)return null;
+ const leader=p.leader;
+ if(leader&&/terminator/i.test(leader.name)&&!spec.terminators)return null;
+ if(leader&&/jump/i.test(leader.name)&&!spec.jump)return null;
+ if(!Number.isInteger(p.models)||p.models<1||p.models>30)return null;
+ return (p.models-(leader?1:0))*(term||jump?2:1)+(leader?(/terminator|jump/i.test(leader.name)?2:1):0);
 }
 function normalizeDeployment(raw,musters){
  const result={player:[],enemy:[]};
@@ -184,48 +201,48 @@ function normalizeDeployment(raw,musters){
   const entries=raw?.[side]||[];
   if(!Array.isArray(entries)||entries.length>musters[side].length)throw Error('Invalid deployment plan.');
   result[side]=musters[side].map((id,i)=>{
-   const mode=entries[i]||'field';
-   if(!['field','reserve'].includes(mode)&&!/^embark:\d+$/.test(mode))throw Error('Unsupported deployment of unit '+(i+1)+'.');
+   const t=BY_ID[id],mode=entries[i]||(t?.special?.aircraft?'reserve':'field');
+   if(!['field','reserve','deepstrike'].includes(mode)&&!/^embark:\d+$/.test(mode))throw Error('Unsupported deployment of unit '+(i+1)+'.');
+   if(mode==='deepstrike'&&!t?.special?.deepStrike)throw Error(t.name+' does not have source-supported Deep Strike.');
+   if(mode==='field'&&(t?.special?.aircraft||t?.special?.immobile))throw Error(t.name+' must begin in Reserves.');
    return mode;
   });
-  const usage=new Map();
+  const usage=new Map(),external=new Set();
   for(let i=0;i<result[side].length;i++){
    const mode=result[side][i];if(!mode.startsWith('embark:'))continue;
    const target=Number(mode.slice(7));
-   if(target===i||target<0||target>=musters[side].length||result[side][target]!=='field')
-    throw Error('Embarkation requires a separately purchased carrier already on the battlefield.');
+   if(target===i||target<0||target>=musters[side].length||result[side][target].startsWith('embark:'))
+    throw Error('Embarkation requires a separately purchased carrier; transports cannot be nested.');
    const vehicle=BY_ID[musters[side][target]],passenger=BY_ID[musters[side][i]];
    const spec=transportSpec(vehicle),space=passengerSpaces(passenger,vehicle);
    if(!spec||space===null)throw Error((passenger?.name||'Passenger')+' is ineligible to board '+(vehicle?.name||'carrier')+'.');
+   if(space===0){if(external.has(target))throw Error(vehicle.name+' can carry only one external Dreadnought.');external.add(target);}
    usage.set(target,(usage.get(target)||0)+space);
    if(usage.get(target)>spec.capacity)throw Error(vehicle.name+' is overloaded ('+usage.get(target)+' / '+spec.capacity+' spaces).');
   }
  }
  return result;
 }
-// Each grid cell represents approximately 2 inches. Ordinary reserves enter
-// from the friendly board edge from round 2 and must be more than 9 inches
-// from enemies. Individual missions may impose further restrictions.
 function canDeployReserve(g,unit,x,y,{invoker=null}={}){
  if(!unit||unit.models<=0||unit.deployment!=='reserve'||unit.side!==g.active||
-    g.finished||g.phase!=='movement'||g.round<2||!validCell(x,y)||
+    g.finished||g.phase!=='reinforcements'||g.round<2||!validCell(x,y)||
     living(g).some(u=>u.x===x&&u.y===y))return false;
- if(living(g,unit.side==='player'?'enemy':'player').some(u=>distance(u,{x,y})<=4))return false;
+ if(living(g,unit.side==='player'?'enemy':'player').some(u=>distance(u,{x,y})*2<=9))return false;
  if(invoker)return invoker.side===unit.side&&invoker.models>0&&invoker.deployment==='field'&&
-   !invoker.battleshocked&&distance(invoker,{x,y})<=3;
+   !invoker.battleshocked&&distance(invoker,{x,y})*2<=6;
+ if(unit.reserveKind==='deepstrike')return true;
  return unit.side==='player'?x<=1:x>=WIDTH-2;
 }
 function deployReserve(g,uid,x,y){
  const unit=reserveUnits(g,g.active).find(u=>u.uid===uid);
- if(!canDeployReserve(g,unit,x,y))return {ok:false,message:'Reserve arrivals require round 2+, the friendly board edge, over 9 inches from enemies and an unoccupied square.'};
+ if(!canDeployReserve(g,unit,x,y))return {ok:false,message:'Arrive in the Reinforcements step from round 2, over 9 inches from enemies, using Deep Strike or the friendly edge.'};
  unit.x=x;unit.y=y;unit.deployment='field';unit.moved=true;unit.advancing=false;
+ unit.arrivedTurn=g.round+'-'+g.active;
  writeLog(g,template(unit).name+' arrived from purchased Reserves at '+(x+1)+','+(y+1)+'.');
  return {ok:true,uid,x,y};
 }
-// Source rule: once per battle PER ARMY, using an already-purchased Bloodletters
-// unit in Reserves. The action does not create, duplicate or discount a unit.
 function invokeBloodletters(g,thrallsUid,bloodlettersUid,x,y){
- if(g.finished||g.phase!=='movement'||g.round<2)return {ok:false,message:'Invocation needs a legal Movement phase starting in round 2.'};
+ if(g.finished||g.phase!=='reinforcements'||g.round<2)return {ok:false,message:'Invocation is at the end of Movement, during Reinforcements from round 2.'};
  if(g.invocationUsed?.[g.active])return {ok:false,message:'This army has already performed Bloodletter Invocation.'};
  const invoker=living(g,g.active).find(u=>u.uid===thrallsUid);
  if(!invoker||template(invoker).name!=='Bloodmarked Thralls'||invoker.battleshocked)
@@ -233,10 +250,9 @@ function invokeBloodletters(g,thrallsUid,bloodlettersUid,x,y){
  const blood=reserveUnits(g,g.active).find(u=>u.uid===bloodlettersUid);
  if(!blood||template(blood).name!=='Bloodletters'||!template(blood).special?.daemon)
   return {ok:false,message:'A purchased Bloodletters unit must already be in Reserves.'};
- if(!canDeployReserve(g,blood,x,y,{invoker}))
-  return {ok:false,message:'Set Bloodletters within 6 inches of Thralls, more than 9 inches from enemies and on an empty square.'};
+ if(!canDeployReserve(g,blood,x,y,{invoker}))return {ok:false,message:'Set Bloodletters within 6 inches of Thralls, more than 9 inches from enemies and on an empty square.'};
  g.invocationUsed=g.invocationUsed||{player:false,enemy:false};
- blood.x=x;blood.y=y;blood.deployment='field';blood.moved=true;
+ blood.x=x;blood.y=y;blood.deployment='field';blood.moved=true;blood.arrivedTurn=g.round+'-'+g.active;
  g.invocationUsed[g.active]=true;
  writeLog(g,'Bloodletter Invocation placed purchased Bloodletters from Reserves (once per army).');
  return {ok:true,uid:blood.uid,x,y};
@@ -261,7 +277,7 @@ function createGame(options={}){
     used.add(key(pos.x,pos.y));
    }
    const t=BY_ID[id];game.units.push({uid:side[0]+i,template:id,side,
-    x:pos?.x??-1,y:pos?.y??-1,deployment:mode.startsWith('embark:')?'embarked':mode,
+    x:pos?.x??-1,y:pos?.y??-1,deployment:mode.startsWith('embark:')?'embarked':mode==='deepstrike'?'reserve':mode,reserveKind:mode==='deepstrike'?'deepstrike':'edge',
     transportUid:mode.startsWith('embark:')?side[0]+Number(mode.slice(7)):null,
     models:t.models,injury:0,
     leaderAlive:!!t.leader,leaderInjury:0,control:'controlled',
@@ -269,34 +285,73 @@ function createGame(options={}){
   });
  }
  place(pm,'player');place(em,'enemy');
+ game.settings.sourceVersions=Object.fromEntries([...new Set([...pm,...em])].filter(id=>BY_ID[id].source==='linked').map(id=>[id,BY_ID[id].sourceVersion||'']));
+ for(const u of game.units)pinBattleProfile(u);
  startTurn(game,'player');
  writeLog(game,'Battle started. '+pm.length+' friendly and '+em.length+' opposing purchased units. Seed '+seed+'.');
  return game;
 }
-function template(u){return BY_ID[u.template];}
+// A background catalogue refresh must not rewrite a battle already in progress.
+// Profiles are not serialized: saves pin revisions and rebuild from trusted data.
+function pinBattleProfile(u){Object.defineProperty(u,'battleProfile',{value:{...BY_ID[u.template]},enumerable:false,configurable:true});}
+function template(u){return u.battleProfile||BY_ID[u.template];}
 function living(game,side){return game.units.filter(u=>u.models>0&&(u.deployment===undefined||u.deployment==='field')&&(!side||u.side===side));}
 function activeForces(game,side){return game.units.filter(u=>u.models>0&&(!side||u.side===side));}
 function reserveUnits(game,side){return game.units.filter(u=>u.models>0&&u.deployment==='reserve'&&(!side||u.side===side));}
 function embarkedUnits(game,side){return game.units.filter(u=>u.models>0&&u.deployment==='embarked'&&(!side||u.side===side));}
 function canDisembark(g,passenger,x,y){
- if(!passenger||passenger.deployment!=='embarked'||passenger.side!==g.active||g.finished||g.phase!=='movement')return false;
+ if(!passenger||passenger.deployment!=='embarked'||passenger.side!==g.active||g.finished||!['movement','reinforcements'].includes(g.phase))return false;
  const vehicle=living(g,passenger.side).find(v=>v.uid===passenger.transportUid);
- return !!vehicle&&!vehicle.moved&&distance(vehicle,{x,y})===1&&validCell(x,y)&&!living(g).some(v=>v.x===x&&v.y===y);
+ if(!vehicle||vehicle.advancing)return false;
+ if(g.phase==='reinforcements'&&vehicle.arrivedTurn!==g.round+'-'+g.active)return false;
+ return distance(vehicle,{x,y})===1&&validCell(x,y)&&!living(g).some(v=>v.x===x&&v.y===y)&&
+  !living(g,passenger.side==='player'?'enemy':'player').some(v=>distance(v,{x,y})<=1)&&
+  (vehicle.arrivedTurn!==g.round+'-'+g.active||!living(g,passenger.side==='player'?'enemy':'player').some(v=>distance(v,{x,y})*2<=9));
 }
 function disembark(g,uid,x,y){
  const u=embarkedUnits(g,g.active).find(u=>u.uid===uid);
- if(!canDisembark(g,u,x,y))return {ok:false,message:'Select an empty adjacent square beside a stationary transport during Movement.'};
- u.deployment='field';u.transportUid=null;u.x=x;u.y=y;u.disembarked=true;
+ if(!canDisembark(g,u,x,y))return {ok:false,message:'Disembark next to the carrier, outside engagement range. Arriving passengers must also remain over 9 inches from enemies.'};
+ const carrier=g.units.find(v=>v.uid===u.transportUid),spec=transportSpec(template(carrier));
+ u.deployment='field';u.transportUid=null;u.x=x;u.y=y;u.disembarked=true;u.disembarkedTurn=g.round+'-'+g.active;
+ if(carrier.moved){u.moved=true;u.noChargeTurn=spec.assaultRamp?null:g.round+'-'+g.active;}
+ if(carrier.arrivedTurn===g.round+'-'+g.active){u.moved=true;u.arrivedTurn=carrier.arrivedTurn;u.noChargeTurn=carrier.arrivedTurn;}
+ if(!carrier.transportAbilityUsed){
+  const name=template(carrier).name;
+  if(name==='Rhino Carrier'){u.transportChargeBonus=1;carrier.transportAbilityUsed=true;}
+  if(name==='Razorback Fire-support Carrier'){u.transportHitReroll=true;carrier.transportAbilityUsed=true;}
+ }
+ if(template(carrier).name==='Kharybdis Assault Claw')u.transportChargeReroll=true;
  writeLog(g,template(u).name+' disembarked at '+(x+1)+','+(y+1)+'.');
  return {ok:true,uid,x,y};
 }
+function applyMortalWounds(g,u,amount,{leaderOnly=false}={}){
+ let damage=0,casualties=0;const t=template(u);
+ for(let i=0;i<amount&&u.models>0;i++){
+  if(leaderOnly&&(!t.leader||u.leaderAlive===false))break;
+  const leader=!!t.leader&&u.leaderAlive!==false&&(leaderOnly||u.models===1),profile=leader?t.leader:t;
+  if(profile.special?.fnp&&d6(g)>=profile.special.fnp)continue;
+  damage++;u.hasSufferedDamage=true;const field=leader?'leaderInjury':'injury';u[field]=(u[field]||0)+1;
+  if(u[field]>=profile.wp){
+   if(profile.name==='Varroth'&&!u.veteranSaveUsed){u.veteranSaveUsed=true;if(d6(g)>=5){u[field]=profile.wp-1;writeLog(g,'Varroth survived a fatal mortal wound (Veteran of Diesor II).');continue;}}
+   u[field]=0;u.models--;casualties++;if(leader)u.leaderAlive=false;
+  }
+ }
+ if(!u.models&&transportSpec(t))emergencyDisembark(g,u);
+ return {damage,casualties};
+}
 function emergencyDisembark(g,carrier){
  for(const u of [...embarkedUnits(g,carrier.side)].filter(v=>v.transportUid===carrier.uid)){
-  const spots=[[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dy])=>({x:carrier.x+dx,y:carrier.y+dy}));
-  const point=spots.find(p=>validCell(p.x,p.y)&&!living(g).some(v=>v.x===p.x&&v.y===p.y));
-  if(point){u.x=point.x;u.y=point.y;u.deployment='field';u.transportUid=null;u.moved=true;u.battleshocked=true;
-   writeLog(g,template(u).name+' made a simplified emergency disembarkation.');}
-  else{u.models=0;writeLog(g,template(u).name+' was lost inside a destroyed transport.');}
+  const spots=[];
+  for(let y=0;y<HEIGHT;y++)for(let x=0;x<WIDTH;x++)if(distance(carrier,{x,y})<=3&&distance(carrier,{x,y})>0)spots.push({x,y});
+  spots.sort((a,b)=>distance(carrier,a)-distance(carrier,b));
+  const point=spots.find(p=>validCell(p.x,p.y)&&!living(g).some(v=>v.x===p.x&&v.y===p.y)&&!living(g,carrier.side==='player'?'enemy':'player').some(v=>distance(v,p)<=1));
+  if(point){
+   const emergency=distance(carrier,point)>1;
+   let mortals=0;for(let i=0;i<u.models;i++)if(d6(g)<=(emergency?3:1))mortals++;
+   u.x=point.x;u.y=point.y;u.deployment='field';u.transportUid=null;u.moved=true;u.battleshocked=true;u.noChargeTurn=g.round+'-'+g.active;
+   applyMortalWounds(g,u,mortals);
+   writeLog(g,template(u).name+' escaped a destroyed transport: '+mortals+' mortal wounds before Feel No Pain.');
+  }else{u.models=0;u.leaderAlive=false;writeLog(g,template(u).name+' was lost inside a destroyed transport.');}
  }
 }
 
@@ -312,9 +367,9 @@ function startTurn(g,side){
  g.active=side;g.phase='movement';
  g.directed=g.directed||{player:null,enemy:null};g.directed[side]=null;
  g.directedUsed=g.directedUsed||{player:false,enemy:false};g.directedUsed[side]=false;
- g.bannonUsed=g.bannonUsed||{player:{hit:false,wound:false},enemy:{hit:false,wound:false}};g.bannonUsed[side]={hit:false,wound:false};
+ g.bannonUsed=g.bannonUsed||{player:{hit:false,wound:false},enemy:{hit:false,wound:false}};g.bannonUsed[side]={hit:false,wound:false};g.bannonRecipient=g.bannonRecipient||{};g.bannonRecipient[side]=null;
  for(const u of living(g,side)){
-  u.moved=false;u.shot=false;u.charged=false;u.chargeSuccess=false;u.fought=false;u.battleshocked=false;u.advancing=false;u.advanceRoll=0;
+  u.transportChargeBonus=0;u.transportHitReroll=false;u.transportChargeReroll=false;u.disembarked=false;u.moved=false;u.shot=false;u.charged=false;u.chargeSuccess=false;u.fought=false;u.battleshocked=false;u.advancing=false;u.advanceRoll=0;
   // Warp-Aggravated Pain: at each Command phase ordinary IW Astartes within
   // 12 inches (six 2-inch cells) of an enemy PSYKER/DAEMON roll D6; on 1–2
   // they suffer -1 ranged Hit until their next Command phase. Lost Cohort and
@@ -360,7 +415,10 @@ function lostCohortControl(g,u){
  if(t.leader&&u.leaderAlive!==false){u.control='controlled';return;}
  const supervisor=supervisingChaplain(g,u);
  if(supervisor){u.control='supervised';writeLog(g,`${t.name} supervised by ${template(supervisor).name} within 12 inches.`);return;}
- const roll=d6(g);u.control=roll>=4?'controlled':'pursuit';
+ let roll=d6(g);
+ const handler=living(g,u.side).find(v=>unitHasAbility(v,'Cohort Handler')&&distance(v,u)*2<=6);
+ if(roll<4&&handler&&once(g,handler,'Cohort Handler')){roll=d6(g);writeLog(g,'Cohort Handler re-rolled the Control Test.');}
+ u.control=roll>=4?'controlled':'pursuit';
  writeLog(g,`${t.name} lost supervision: Control Test ${roll} — ${u.control==='pursuit'?'Aggressive Pursuit':'controlled'}.`);
  if(u.control==='pursuit')pursue(g,u);
 }
@@ -375,9 +433,10 @@ function declareDirectedObjective(g,side,targetId){
 }
 function isIWMarine(t){return t?.faction==='IW'&&!!t.special?.fnp&&!t.special?.daemon&&!/thrall|reaver|servitor/i.test(t.name);}
 function hasAbility(t,name){return (t.abilities||[]).some(a=>a.name===name);}
+function unitHasAbility(u,name){return hasAbility(template(u),name)||(u.leaderAlive!==false&&hasAbility(template(u).leader||{},name));}
 function once(g,u,name,scope='turn'){
  const bag=u.abilityUses||(u.abilityUses={});
- const mark=scope==='battle'?'battle':scope==='phase'?`${g.round}-${g.active}-${g.phase}`:`${g.round}-${g.active}`;
+ const mark=scope==='battle'?'battle':scope==='round'?String(g.round):scope==='phase'?`${g.round}-${g.active}-${g.phase}`:`${g.round}-${g.active}`;
  if(bag[name]===mark)return false;
  bag[name]=mark;return true;
 }
@@ -385,8 +444,14 @@ function hasActiveLeaderAbility(u,name){
  return u.leaderAlive!==false && hasAbility(template(u).leader||{},name);
 }
 function isVehicle(t){return /vehicle|dreadnought|tank|transport|siege armour|artillery|daemon engine|gunship|speeder|aircraft/i.test((t.category||'')+' '+t.name);}
-function isAircraft(t){return /aircraft|gunship|interceptor|stormbird|thunderhawk|stormraven/i.test((t.category||'')+' '+t.name);}
+function isAircraft(t){if(typeof t.special?.aircraft==='boolean')return t.special.aircraft;return /aircraft|gunship|interceptor|stormbird|thunderhawk|stormraven/i.test((t.category||'')+' '+t.name);}
 const HIT_ABILITIES=[
+ ['Linked Fury',()=>true,'battle'],
+ ['Outflank',(g,a,b,m)=>m==='ranged'&&a.arrivedTurn===g.round+'-'+g.active,'turn'],
+ ['Specialist Volley',(g,a,b,m,w)=>m==='ranged'&&/plasma|melta|flamer|volkite|grav/i.test(w.name),'turn'],
+ ['Wrath Harness',(g,a,b,m)=>m==='melee'&&!!a.hasSufferedDamage,'battle'],
+ ['Champion-Seeker',(g,a,b,m)=>m==='melee'&&(template(b).isLeader||template(b).leader&&b.leaderAlive!==false),'phase'],
+ ['Linked Assault',(g,a,b)=>b.shotBy?.turn===g.round+'-'+g.active&&b.shotBy.ids.some(id=>id!==a.uid),'phase'],
  ['Ashen Chain',(g,a,b,m)=>EQUAL(m,'ranged','melee')&&distance(a,b)<=4,'phase'],
  ['Disciplined Line',(g,a,b,m)=>m==='ranged'&&g.directed?.[a.side]===b.uid,'turn'],
  ['Veterans of Two Judgments',(g,a,b,m)=>m==='melee','phase'],
@@ -401,6 +466,8 @@ const HIT_ABILITIES=[
  ['Patient Recon',(g,a,b,m)=>m==='ranged'&&/scout/i.test(template(b).name+' '+(template(b).category||'')),'turn']
 ];
 const WOUND_ABILITIES=[
+ ['Champion-Seeker',(g,a,b,m)=>m==='melee'&&(template(b).isLeader||template(b).leader&&b.leaderAlive!==false),'phase'],
+ ['Suppression Grid',(g,a,b,m,w)=>m==='ranged'&&/heavy/i.test(w.name+' '+w.traits),'phase'],
  ['Controlled Fury',(g,a,b,m)=>m==='melee'&&!!a.chargeSuccess,'phase'],
  ['Butcher’s Precision',(g,a,b,m)=>m==='melee'&&/elite|terminator|veteran|chosen/i.test(template(b).name+' '+(template(b).category||'')),'phase'],
  ['Demolition Arc',(g,a,b,m)=>m==='ranged'&&g.objectives.some(o=>distance(b,o)<=1),'turn'],
@@ -416,7 +483,7 @@ function EQUAL(value,...allowed){return allowed.includes(value);}
 function tryAbilityReroll(g,a,b,mode,weapon,kind){
  const t=template(a),candidates=kind==='hit'?HIT_ABILITIES:WOUND_ABILITIES;
  for(const [name,eligible,scope] of candidates){
-  if(hasAbility(t,name)&&eligible(g,a,b,mode,weapon)&&once(g,a,`${kind}:${name}`,scope)){
+  if(unitHasAbility(a,name)&&eligible(g,a,b,mode,weapon)&&once(g,a,`${kind}:${name}`,scope)){
    writeLog(g,`${t.name}: ${name} re-rolled one ${kind} die.`);return true;
   }
  }
@@ -424,6 +491,7 @@ function tryAbilityReroll(g,a,b,mode,weapon,kind){
 }
 function trySavingReroll(g,u,weapon,mode){
  const t=template(u);
+ if((hasAbility(t,'Relic Pilot')||/^(Contemptor|Leviathan|Deredeo|Helbrute)/.test(t.name))&&Number(weapon.damageValue||weapon.damage)===1&&once(g,u,'save:Relic Pilot','round'))return true;
  if(hasAbility(t,'Leviathan of Old')&&once(g,u,'save:Leviathan of Old','battle'))return true;
  if(hasAbility(t,'Breacher Shield')&&mode==='ranged'&&g.objectives.some(o=>distance(u,o)<=1)&&once(g,u,'save:Breacher Shield','phase'))return true;
  return false;
@@ -432,8 +500,10 @@ function shockTest(g,u){
  const t=template(u),target=Number.isFinite(t.ld)?t.ld:7;
  let roll=d6(g)+d6(g);
  const leaderName=t.leader&&u.leaderAlive!==false?t.leader.name:t.name;
- if(roll<target&&((/(Infernal Chaplain|Orvath Krail)/.test(leaderName)&&!u.shockRerollUsed)||hasAbility(t,'Expeditionary Discipline')&&once(g,u,'shock:Expeditionary Discipline','battle'))){
-  u.shockRerollUsed=true;writeLog(g,`${leaderName} used its once-per-battle Battle-shock re-roll.`);roll=d6(g)+d6(g);
+ if(u.nextShockPass){u.nextShockPass=false;u.battleshocked=false;return {roll:12,passed:true};}
+ const penalty=u.nextShockPenalty||0;roll-=penalty;u.nextShockPenalty=0;
+ if(roll<target&&(((unitHasAbility(u,'Litany of Restraint')||unitHasAbility(u,'Oath Without End')||!t.leader?.abilities?.length&&/^(Infernal Chaplain|Orvath Krail)$/.test(leaderName)||unitHasAbility(u,'Line Held')&&g.objectives.some(o=>distance(u,o)<=1))&&!u.shockRerollUsed)||hasAbility(t,'Expeditionary Discipline')&&once(g,u,'shock:Expeditionary Discipline','battle'))){
+  u.shockRerollUsed=true;writeLog(g,`${leaderName} used its once-per-battle Battle-shock re-roll.`);roll=d6(g)+d6(g)-penalty;
  }
  u.battleshocked=roll<target;
  writeLog(g,`${t.name} Battle-shock ${roll} vs ${target}+ — ${u.battleshocked?'FAILED (0 OC until Command phase)':'passed'}.`);
@@ -444,14 +514,68 @@ function bearerAlive(g,side,name){
 }
 function directedRerolls(g,attacker,target,mode){
  if(mode!=='melee'||g.directed?.[attacker.side]!==target.uid||g.directedUsed?.[attacker.side]||!isIWMarine(template(attacker)))return false;
- const helpers=living(g,attacker.side).filter(u=>u.uid!==attacker.uid&&isIWMarine(template(u))&&distance(u,target)<=5);
+ const helpers=living(g,attacker.side).filter(u=>u.uid!==attacker.uid&&isIWMarine(template(u))&&distance(u,target)*2<=9);
  if(!helpers.length)return false;
  g.directedUsed[attacker.side]=true;
  return true;
 }
 function bannonRerolls(g,attacker,target){
  if(g.directed?.[attacker.side]!==target.uid||!isIWMarine(template(attacker)))return false;
- return bearerAlive(g,attacker.side,'Balan Bannon').some(u=>distance(u,attacker)<=5);
+ if(g.bannonRecipient?.[attacker.side]&&g.bannonRecipient[attacker.side]!==attacker.uid)return false;
+ const eligible=bearerAlive(g,attacker.side,'Balan Bannon').some(u=>distance(u,attacker)*2<=9);
+ if(eligible){g.bannonRecipient=g.bannonRecipient||{};g.bannonRecipient[attacker.side]=attacker.uid;}return eligible;
+}
+function abilityOptions(g,uid){
+ const owner=living(g,g.active).find(u=>u.uid===uid);if(!owner||g.finished)return [];
+ const actions=[];
+ const add=(name,phase,side,range,eligible)=>{
+  if(g.phase!==phase||!unitHasAbility(owner,name))return;
+  for(const target of living(g,side))if(distance(owner,target)*2<=range&&eligible(target))actions.push({name,targetId:target.uid,label:name+' → '+template(target).name});
+ };
+ add('Custodian of Engines','reinforcements',owner.side,3,u=>isVehicle(template(u))&&u.injury>0);
+ add('Serum Custodian','movement',owner.side,3,u=>isIWMarine(template(u))&&(u.injury>0||u.leaderInjury>0));
+ add('Neurological Stabilizers','shooting',owner.side,6,u=>u.painPenalty>0&&!template(u).special?.lost);
+ add('Harbinger of Blood','movement',owner.side==='player'?'enemy':'player',6,()=>true);
+ add('Battlefield Dislocation','movement',owner.side==='player'?'enemy':'player',9,()=>true);
+ return actions.filter(a=>{
+  const scope=['Harbinger of Blood','Battlefield Dislocation'].includes(a.name)?'battle':g.round+'-'+g.active;
+  return owner.abilityUses?.['action:'+a.name]!==scope;
+ });
+}
+function useAbility(g,uid,name,targetId){
+ if(!abilityOptions(g,uid).some(a=>a.name===name&&a.targetId===targetId))return {ok:false,message:'Ability unavailable: check its timing, range, target and remaining uses.'};
+ const owner=g.units.find(u=>u.uid===uid),target=g.units.find(u=>u.uid===targetId);
+ const scope=['Harbinger of Blood','Battlefield Dislocation'].includes(name)?'battle':'turn';
+ if(!once(g,owner,'action:'+name,scope))return {ok:false,message:'This ability has already been used.'};
+ if(name==='Custodian of Engines'){
+  const crew=living(g,owner.side).find(u=>hasAbility(template(u),'Maintenance Crew')&&distance(u,owner)*2<=3&&!u.maintenanceUsed);
+  let restored=1;if(crew){restored=2;crew.maintenanceUsed=true;}
+  target.injury=Math.max(0,target.injury-restored);
+ }else if(name==='Serum Custodian'){
+  const field=target.injury>0?'injury':'leaderInjury';target[field]=Math.max(0,target[field]-1);
+ }else if(name==='Neurological Stabilizers')target.painSuppressedPhase=g.round+'-'+g.active+'-'+g.phase;
+ else if(name==='Harbinger of Blood')shockTest(g,target);
+ else if(name==='Battlefield Dislocation')target.nextShockPenalty=1;
+ writeLog(g,template(owner).name+' used '+name+' on '+template(target).name+'.');
+ return {ok:true};
+}
+function autoAbilities(g,side){
+ for(const owner of living(g,side)){
+  const names=new Set();
+  for(const action of abilityOptions(g,owner.uid))if(!names.has(action.name)){useAbility(g,owner.uid,action.name,action.targetId);names.add(action.name);}
+ }
+}
+function auraHitReroll(g,a,b,mode){
+ const rules=[
+  ['Forge Liaison',9,mode==='ranged'&&/daemon engine/i.test(template(a).category||'')],
+  ['Iron Column',9,mode==='ranged'&&isVehicle(template(a))],
+  ['The Voice Commands',6,/Ashen Chain/i.test(template(a).name)]
+ ];
+ for(const [name,range,eligible] of rules){if(!eligible)continue;
+  const owner=living(g,a.side).find(u=>unitHasAbility(u,name)&&distance(u,a)*2<=range&&u.abilityUses?.['aura:'+name]!==g.round+'-'+g.active);
+  if(owner&&once(g,owner,'aura:'+name)){writeLog(g,template(owner).name+' used '+name+'.');return true;}
+ }
+ return false;
 }
 function occupants(g,x,y){return living(g).find(u=>u.x===x&&u.y===y);}
 function walkable(g,x,y,ignoreUid){return validCell(x,y)&&!living(g).some(u=>u.uid!==ignoreUid&&u.x===x&&u.y===y);}
@@ -473,17 +597,17 @@ function pathDistance(g,u,x,y){
 // so selecting several destination tiles cannot fish for a better result.
 function beginAdvance(g,uid){
  const u=living(g,g.active).find(x=>x.uid===uid);
- if(!u||u.moved||u.advancing||u.control==='pursuit'||g.phase!=='movement')return {ok:false,message:'Advance unavailable for that unit in this phase.'};
+ if(g.finished||!u||template(u).special?.immobile||u.moved||u.advancing||u.control==='pursuit'||g.phase!=='movement')return {ok:false,message:'Advance unavailable for that unit in this phase.'};
  const t=template(u);let roll=d6(g);
- if((hasAbility(t,'Legion Rush')||hasAbility(t,'Relic Mobility'))&&roll<=2){
+ if((unitHasAbility(u,'Legion Rush')||unitHasAbility(u,'Relic Mobility')||unitHasAbility(u,'Reaver Assault'))&&roll<=2){
   roll=d6(g);writeLog(g,`${t.name} re-rolled its Advance die.`);
  }
- if(hasAbility(t,'Pursuit Column')||hasAbility(t,'Fast Spearhead'))roll++;
+ if(hasAbility(t,'Pursuit Column')||hasAbility(t,'Fast Spearhead')||unitHasAbility(u,'Long March Doctrine'))roll++;
  u.advancing=true;u.advanceRoll=roll;
  writeLog(g,`${t.name} Advanced: extra ${roll} inches (${Math.ceil(roll/2)} grid cells).`);
  return {ok:true,roll,extra:Math.ceil(roll/2)};
 }
-function canMove(g,uid,x,y){const u=living(g).find(x=>x.uid===uid);return !!u&&u.control!=='pursuit'&&u.side===g.active&&g.phase==='movement'&&!u.moved&&pathDistance(g,u,x,y)<=template(u).move+(u.advancing?Math.ceil((u.advanceRoll||0)/2):0)&&!(u.x===x&&u.y===y);}
+function canMove(g,uid,x,y){const u=living(g).find(x=>x.uid===uid);return !g.finished&&!!u&&!template(u).special?.immobile&&u.control!=='pursuit'&&u.side===g.active&&g.phase==='movement'&&!u.moved&&pathDistance(g,u,x,y)<=template(u).move+(u.advancing?Math.ceil((u.advanceRoll||0)/2):0)&&!(u.x===x&&u.y===y);}
 function move(g,uid,x,y){if(!canMove(g,uid,x,y))return {ok:false,message:'Illegal move: check movement phase, range and occupied terrain.'};
  const u=g.units.find(u=>u.uid===uid);u.x=x;u.y=y;u.moved=true;writeLog(g,`${template(u).name} moved to ${x+1},${y+1}.`);return {ok:true};}
 function woundTarget(s,t){if(s>=t*2)return 2;if(s>t)return 3;if(s===t)return 4;if(s*2<=t)return 6;return 5;}
@@ -497,7 +621,9 @@ function weaponTraits(w){
  return {torrent:flag('torrent'),pistol:flag('pistol'),heavy:flag('heavy'),twinLinked:/twin-linked/.test(raw),
   ignoresCover:/ignores cover/.test(raw),lethalHits:/lethal hits/.test(raw),
   devastatingWounds:/devastating wounds/.test(raw),precision:flag('precision'),rapidFire:n('rapid fire'),melta:n('melta'),
-  sustainedHits:n('sustained hits'),blast:flag('blast')};
+  sustainedHits:n('sustained hits'),blast:flag('blast'),indirect:/indirect fire/i.test(raw),
+  hazardous:/hazardous/i.test(raw)&&!/on overcharge/i.test(raw),oneShot:/one shot/i.test(raw),extraAttacks:/extra attacks/i.test(raw),
+  anti:[...raw.matchAll(/anti-([a-z]+)\s+(\d)\+/g)].map(m=>({keyword:m[1],value:Number(m[2])}))};
 }
 // Linked New Recruit defaults can include mixed weapons (e.g. four bolters
 // and a plasma pistol). Resolve those profiles separately instead of giving
@@ -506,26 +632,44 @@ function weaponTraits(w){
 function attackProfiles(t,mode,remainingModels,leaderAlive=true){
  if(t.source==='linked'&&Array.isArray(t.loadout)&&t.loadout.length){
   const found=t.loadout.filter(w=>w.mode===mode&&Number.isFinite(w.attacks)&&w.attacks>0&&w.count>0);
-  return found.map((w,i)=>({...w,attacks:w.attacks+(t.special?.lost&&mode==='melee'&&!w.isLeader&&i===found.findIndex(v=>!v.isLeader)?1:0),activeCount:t.leader&&t.bodyguardModels
-   ?(w.isLeader?(leaderAlive?1:0):Math.min(Math.max(0,remainingModels-(leaderAlive?1:0)),Math.max(0,Math.round(w.count*Math.max(0,remainingModels-(leaderAlive?1:0))/t.bodyguardModels))))
-   :Math.min(remainingModels,Math.max(0,Math.round(w.count*remainingModels/t.models)))}));
+  return found.map((w,i)=>({...w,attacks:w.attacks+(t.special?.lost&&mode==='melee'&&!w.isLeader&&i===found.findIndex(v=>!v.isLeader)?1:0),attackBonus:(t.special?.lost&&mode==='melee'&&!w.isLeader&&i===found.findIndex(v=>!v.isLeader)?1:0),activeCount:t.leader&&t.bodyguardModels
+   ?(w.isLeader?(leaderAlive?1:0):Math.max(0,Math.round(w.count*Math.max(0,remainingModels-(leaderAlive?1:0))/t.bodyguardModels)))
+   :Math.max(0,Math.round(w.count*remainingModels/t.models))}));
  }
  const w=t[mode];return w?.attacks>0?[{...w,name:mode,count:t.models,activeCount:remainingModels}]:[];
 }
+function targetKeyword(t,key){
+ const text=[t.name,t.category,...(t.keywords||[])].join(' ');
+ return key==='vehicle'?isVehicle(t):key==='aircraft'?isAircraft(t):key==='infantry'?!isVehicle(t)&&!/bike|mounted|hound|crusher/i.test(text):new RegExp(key,'i').test(text);
+}
+function eligibleAttackProfiles(g,a,b,mode){
+ if(g.finished||!['ranged','melee'].includes(mode)||!a||!b||a.models<1||b.models<1||a.side!==g.active||a.side===b.side||
+  !living(g).includes(a)||!living(g).includes(b)||g.phase!==(mode==='ranged'?'shooting':'fight')||
+  (mode==='ranged'?a.shot:a.fought)||a.control==='pursuit'&&nearestEnemy(g,a)?.uid!==b.uid)return [];
+ const t=template(a),dist=distance(a,b),engaged=living(g,b.side).some(u=>distance(a,u)<=1),visible=hasLineOfSight(a,b);
+ let weapons=attackProfiles(t,mode,a.models,a.leaderAlive!==false).filter(w=>{
+  const tr=weaponTraits(w);
+  return w.range>=dist&&w.activeCount>0&&(!a.advancing||mode!=='ranged'||/assault/i.test(w.traits||''))&&
+   (mode!=='ranged'||visible||tr.indirect)&&
+   (mode!=='ranged'||!engaged||dist<=1&&tr.pistol||isVehicle(t)&&!tr.blast)&&
+   (!tr.oneShot||!a.oneShotUsed?.includes(w.sourceProfileId||w.name));
+ });
+ // Frag/krak and other named profiles are alternatives for the same gun.
+ // Choose deterministically against the selected target; never fire both.
+ const groups=new Map(),out=[];
+ const expected=w=>w.attacks*(7-w.skill)/6*(7-woundTarget(w.s,template(b).t))/6*Math.max(1,w.damage)*(1+w.ap/6);
+ for(const w of weapons){if(!w.alternativeGroup)out.push(w);else if(!groups.has(w.alternativeGroup)||expected(w)>expected(groups.get(w.alternativeGroup)))groups.set(w.alternativeGroup,w);}
+ weapons=[...out,...groups.values()];
+ // Infantry cannot fire pistols and their other guns in the same sequence.
+ if(mode==='ranged'&&!isVehicle(t)&&weapons.some(w=>!weaponTraits(w).pistol))weapons=weapons.filter(w=>!weaponTraits(w).pistol);
+ return weapons;
+}
+function canAttack(g,aid,bid,mode){return eligibleAttackProfiles(g,g.units.find(u=>u.uid===aid),g.units.find(u=>u.uid===bid),mode).length>0;}
 function attack(g,attackerId,targetId,mode){
  const a=living(g).find(u=>u.uid===attackerId),b=living(g).find(u=>u.uid===targetId);
- if(!a||!b||a.side===b.side||a.side!==g.active)return {ok:false,message:'Select a living allied attacker and an enemy target.'};
- if(g.phase!==(mode==='ranged'?'shooting':'fight'))return {ok:false,message:'Wrong combat phase.'};
- if(mode==='ranged'&&a.shot||mode==='melee'&&a.fought)return {ok:false,message:'That unit has already attacked this phase.'};
-  if(mode==='ranged'&&!hasLineOfSight(a,b))return {ok:false,message:'A wall blocks line of sight to that target.'};
+ const weapons=eligibleAttackProfiles(g,a,b,mode);
+ if(!weapons.length)return {ok:false,message:'No legal attack: check phase, weapon range, line of sight, engagement and whether the unit has already attacked.'};
  const at=template(a),bt=template(b),dist=distance(a,b);
- if(a.control==='pursuit'&&nearestEnemy(g,a)?.uid!==targetId)return {ok:false,message:'Aggressive Pursuit: the Lost Cohort must target its nearest enemy.'};
- const engaged=living(g,a.side==='player'?'enemy':'player').some(u=>distance(a,u)<=1);
- const weapons=attackProfiles(at,mode,a.models,a.leaderAlive!==false).filter(w=>w.range>=dist&&w.activeCount>0&&
-  (!a.advancing||mode!=='ranged'||/\bassault\b/i.test(w.traits||''))&&
-  (mode!=='ranged'||!engaged||(dist<=1&&weaponTraits(w).pistol)));
- if(!weapons.length)return {ok:false,message:`No equipped ${mode==='ranged'?'ranged':'melee'} weapon can attack at this range.`};
- if(mode==='ranged'&&dist<=1&&!weapons.length)return {ok:false,message:'Only Pistol weapons can fire while engaged.'};
  if(mode==='ranged')a.shot=true;else a.fought=true;
  let hits=0,wounds=0,unsaved=0,casualties=0,effective=0,attacks=0;
  g.bannonUsed=g.bannonUsed||{};g.bannonUsed[a.side]=g.bannonUsed[a.side]||{hit:false,wound:false};
@@ -533,16 +677,18 @@ function attack(g,attackerId,targetId,mode){
  const rerolls={hit:false,wound:false};
  for(const weapon of weapons){
   const tr=weaponTraits(weapon);
+  if(tr.oneShot){a.oneShotUsed=a.oneShotUsed||[];a.oneShotUsed.push(weapon.sourceProfileId||weapon.name);}
   const bonus=mode==='ranged'&&dist<=weapon.range/2;
   let base=0;
-  for(let m=0;m<weapon.activeCount;m++)base=Math.min(80,base+rollProfileValue(g,weapon.attackValue,weapon.attacks));
+  for(let m=0;m<weapon.activeCount;m++)base=Math.min(6000,base+rollProfileValue(g,weapon.attackValue,weapon.attacks)+(weapon.attackValue?(weapon.attackBonus||0):0));
   const blast=mode==='ranged'&&tr.blast?Math.floor(b.models/5)*weapon.activeCount:0;
-  const attempts=Math.min(80-attacks,base+(bonus?tr.rapidFire*weapon.activeCount:0)+blast);
+  const attempts=Math.min(6000-attacks,base+(bonus?tr.rapidFire*weapon.activeCount:0)+blast);
   if(attempts<=0)break;attacks+=attempts;
-  const hitRoll=clamp(weapon.skill+((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+
+  const indirect=mode==='ranged'&&!hasLineOfSight(a,b);
+  const hitRoll=clamp(weapon.skill+clamp(((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+
    ((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0)+
-   (mode==='ranged'?(a.painPenalty||0):0)-
-   (mode==='ranged'&&tr.heavy&&!a.moved?1:0),2,6);
+   (mode==='ranged'&&a.painSuppressedPhase!==g.round+'-'+g.active+'-'+g.phase?(a.painPenalty||0):0)-
+   (mode==='ranged'&&tr.heavy&&!a.moved?1:0)+(indirect?1:0),-1,1),2,6);
   // Lethal Hits and Sustained Hits are checked on an unmodified hit roll of 6.
   // Each successful hit is then resolved against the current surviving model.
   for(let i=0;i<attempts&&b.models>0;i++){
@@ -554,9 +700,10 @@ function attack(g,attackerId,targetId,mode){
     else{g.bannonUsed[a.side].hit=true;}
     roll=d6(g);hitRerolled=true;
    }
-   if(!hitRerolled&&!tr.torrent&&roll<hitRoll&&tryAbilityReroll(g,a,b,mode,weapon,'hit'))roll=d6(g);
+   if(!hitRerolled&&!tr.torrent&&roll<hitRoll&&a.transportHitReroll){a.transportHitReroll=false;roll=d6(g);hitRerolled=true;}
+   if(!hitRerolled&&!tr.torrent&&roll<hitRoll){if(tryAbilityReroll(g,a,b,mode,weapon,'hit')||auraHitReroll(g,a,b,mode))roll=d6(g);}
    const critical=tr.torrent?false:roll===6;
-   if(!tr.torrent&&roll<hitRoll)continue;
+   if(!tr.torrent&&(roll<hitRoll||indirect&&roll<4))continue;
    const repeat=critical?1+tr.sustainedHits:1;
    for(let extra=0;extra<repeat&&b.models>0;extra++){
     hits++;
@@ -564,22 +711,24 @@ function attack(g,attackerId,targetId,mode){
     const bodyguards=b.models-(leaderUp?1:0);
     const targetLeader=leaderUp&&(tr.precision||bodyguards===0);
     const defenderProfile=targetLeader?bt.leader:bt;
+    const anti=tr.anti.some(k=>targetKeyword(bt,k.keyword));
+    const threshold=anti?Math.min(...tr.anti.filter(k=>targetKeyword(bt,k.keyword)).map(k=>k.value)):6;
     const autoWound=critical&&extra===0&&tr.lethalHits;
     let wr=autoWound?6:d6(g);
     let woundRerolled=false;
-    if(!autoWound&&wr<woundTarget(weapon.s,defenderProfile.t)&&tr.twinLinked){wr=d6(g);woundRerolled=true;}
-    if(!autoWound&&!woundRerolled&&wr<woundTarget(weapon.s,defenderProfile.t)&&(
+    if(!autoWound&&wr<Math.min(woundTarget(weapon.s,bt.t),threshold)&&tr.twinLinked){wr=d6(g);woundRerolled=true;}
+    if(!autoWound&&!woundRerolled&&wr<Math.min(woundTarget(weapon.s,bt.t),threshold)&&(
       directed&&!rerolls.wound || bannon&&!g.bannonUsed?.[a.side]?.wound)){
      if(directed&&!rerolls.wound)rerolls.wound=true;
      else{g.bannonUsed[a.side].wound=true;}
      wr=d6(g);woundRerolled=true;
     }
-    if(!autoWound&&!woundRerolled&&wr<woundTarget(weapon.s,defenderProfile.t)&&tryAbilityReroll(g,a,b,mode,weapon,'wound'))wr=d6(g);
-    if(!autoWound&&wr<woundTarget(weapon.s,defenderProfile.t))continue;
+    if(!autoWound&&!woundRerolled&&wr<Math.min(woundTarget(weapon.s,bt.t),threshold)&&tryAbilityReroll(g,a,b,mode,weapon,'wound'))wr=d6(g);
+    if(!autoWound&&wr<Math.min(woundTarget(weapon.s,bt.t),threshold))continue;
     wounds++;
-    const bypass=tr.devastatingWounds&&!autoWound&&wr===6;
+    const bypass=tr.devastatingWounds&&!autoWound&&wr>=threshold;
     if(!bypass){
-     const coverBonus=mode==='ranged'&&!tr.ignoresCover&&COVER.has(key(b.x,b.y))?1:0;
+     const coverBonus=mode==='ranged'&&!tr.ignoresCover&&(COVER.has(key(b.x,b.y))||indirect)?1:0;
      const save=clamp(defenderProfile.save+weapon.ap-coverBonus,2,7);
      if(save<=6){let saving=d6(g);if(saving<save&&trySavingReroll(g,b,weapon,mode))saving=d6(g);if(saving>=save)continue;}
     }
@@ -594,7 +743,7 @@ function attack(g,attackerId,targetId,mode){
     let damage=0;
     for(let p=0;p<rawDamage;p++)if(!(special.fnp&&d6(g)>=special.fnp))damage++;
     const prior=targetLeader?(b.leaderInjury||0):b.injury;
-    const applied=Math.min(damage,wp-prior);effective+=applied;
+    const applied=Math.min(damage,wp-prior);effective+=applied;if(applied)b.hasSufferedDamage=true;
     if(targetLeader){
      b.leaderInjury=prior+applied;
      if(b.leaderInjury>=wp){
@@ -614,36 +763,56 @@ function attack(g,attackerId,targetId,mode){
    }
   }
  }
+ if(mode==='ranged'){
+  b.shotBy=b.shotBy?.turn===g.round+'-'+g.active?b.shotBy:{turn:g.round+'-'+g.active,ids:[]};b.shotBy.ids.push(a.uid);
+ }
+ for(const weapon of weapons)if(weaponTraits(weapon).hazardous){
+  for(let i=0;i<weapon.activeCount&&a.models>0;i++)if(d6(g)===1){
+   if(isVehicle(at)||at.isLeader||weapon.isLeader)applyMortalWounds(g,a,3,{leaderOnly:!!weapon.isLeader});
+   else if(a.models-(at.leader&&a.leaderAlive!==false?1:0)>0){a.models--;a.injury=0;a.hasSufferedDamage=true;}
+   writeLog(g,at.name+' suffered a failed Hazardous test.');
+  }
+ }
  writeLog(g,`${at.name} ${mode==='ranged'?'fired on':'struck'} ${bt.name}: ${hits}/${attacks} hits, ${wounds} wounds, ${effective} damage, ${casualties} models removed${b.models===0?' — DESTROYED':''}.`);
  return {ok:true,attacks,hits,wounds,unsaved,damage:effective,casualties,eliminated:b.models===0};
 }
 
 function canCharge(g,aid,bid){
  const a=living(g).find(u=>u.uid===aid),b=living(g).find(u=>u.uid===bid);
- if(!a||!b||a.side!==g.active||a.side===b.side||g.phase!=='charge'||a.charged||a.advancing)return false;
+ if(g.finished||!a||!b||template(a).special?.immobile||a.noChargeTurn===g.round+'-'+g.active||a.side!==g.active||a.side===b.side||g.phase!=='charge'||a.charged||a.advancing)return false;
  if(a.control==='pursuit'&&nearestEnemy(g,a)?.uid!==bid)return false;
- return distance(a,b)>=2 && distance(a,b)<=7;
+ return distance(a,b)>=2 && distance(a,b)*2<=12;
 }
 function charge(g,aid,bid){
  if(!canCharge(g,aid,bid))return {ok:false,message:'Charge unavailable. Select a target 2–7 squares away.'};
  const a=g.units.find(u=>u.uid===aid),b=g.units.find(u=>u.uid===bid);a.charged=true;
- let first=d6(g),second=d6(g),roll=first+second;
+ let first=d6(g),second=d6(g),roll=first+second+(a.transportChargeBonus||0);
  const adj=[[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dy])=>({x:b.x+dx,y:b.y+dy})).filter(p=>walkable(g,p.x,p.y,a.uid)).map(p=>({...p,steps:pathDistance(g,a,p.x,p.y)})).sort((a,b)=>a.steps-b.steps);
- if(adj.length&&adj[0].steps>roll){
+ if(adj.length&&adj[0].steps*2>roll){
   const t=template(a),target=template(b);
   const chargeRule=[
    ['Blood-Bound Hunt',true],['Blood God’s Assault',true],
+   ['Last Order',true],
+   ['Skyborne Commander',a.reserveKind==='deepstrike'&&a.arrivedTurn===g.round+'-'+g.active],
+   ['Ashen Chain Commander',a.arrivedTurn===g.round+'-'+g.active&&/terminator/i.test(template(a).name)],
+   ['Assault Descent',/Assault Jump Cadre/.test(template(a).name)&&a.arrivedTurn===g.round+'-'+g.active],
+   ['Void Knife',a.disembarkedTurn===g.round+'-'+g.active],
+   ['Breach Veteran',a.disembarkedTurn===g.round+'-'+g.active&&/terminator/i.test(template(a).name)],
+   ['Armoured Breakthrough',a.disembarkedTurn===g.round+'-'+g.active],
    ['Blood-Earned Discipline',g.objectives.some(o=>distance(b,o)<=1)],
    ['Greater Daemon',true]
-  ].find(([n,eligible])=>eligible&&hasAbility(t,n));
-  if(chargeRule&&once(g,a,'charge:'+chargeRule[0],chargeRule[0]==='Blood-Earned Discipline'?'turn':'battle')){
+  ].find(([n,eligible])=>eligible&&unitHasAbility(a,n));
+  if(!chargeRule&&a.transportChargeReroll){if(first<=second)first=d6(g);else second=d6(g);roll=first+second+(a.transportChargeBonus||0);a.transportChargeReroll=false;}
+  if(chargeRule&&once(g,a,'charge:'+chargeRule[0],['Blood-Earned Discipline','Blood-Bound Hunt','Skyborne Commander','Ashen Chain Commander','Assault Descent','Breach Veteran','Armoured Breakthrough'].includes(chargeRule[0])?'turn':'battle')){
    if(chargeRule[0]==='Greater Daemon'){first=d6(g);second=d6(g);}else if(first<=second)first=d6(g);else second=d6(g);
-   roll=first+second;writeLog(g,`${t.name}: ${chargeRule[0]} re-rolled ${chargeRule[0]==='Greater Daemon'?'both charge dice':'one charge die'}.`);
+   roll=first+second+(a.transportChargeBonus||0);writeLog(g,`${t.name}: ${chargeRule[0]} re-rolled ${chargeRule[0]==='Greater Daemon'?'both charge dice':'one charge die'}.`);
   }
  }
- if(!adj.length||adj[0].steps>roll){writeLog(g,`${template(a).name} failed charge against ${template(b).name} (${roll}).`);return {ok:true,success:false,roll};}
+ if(!adj.length||adj[0].steps*2>roll){writeLog(g,`${template(a).name} failed charge against ${template(b).name} (${roll}).`);return {ok:true,success:false,roll};}
  a.x=adj[0].x;a.y=adj[0].y;a.chargeSuccess=true;writeLog(g,`${template(a).name} charged ${template(b).name} (${roll}).`);
  const t=template(a);
+ for(const ability of ['Falling Spear','Impact Assault'])if(unitHasAbility(a,ability)&&once(g,a,'charge:'+ability,'battle')&&d6(g)>=4)applyMortalWounds(g,b,1);
+ if(unitHasAbility(a,'Shock Fright')&&once(g,a,'charge:Shock Fright','battle'))shockTest(g,b);
  if((t.name==='Balan Bannon'||t.leader?.name==='Balan Bannon'&&a.leaderAlive!==false)&&!a.judgmentUsed){
   a.judgmentUsed=true;shockTest(g,b);
   writeLog(g,'Judgment of Fire activated once this battle.');
@@ -675,7 +844,7 @@ function checkFinished(g){
 }
 // Automatic battles obey the same arrival geometry as player actions.
 function autoDeployReserves(g,side){
- if(g.round<2||g.phase!=='movement')return 0;
+ if(g.round<2||g.phase!=='reinforcements')return 0;
  let deployed=0;
  for(const u of [...reserveUnits(g,side)]){
   let placed=false;
@@ -687,7 +856,7 @@ function autoDeployReserves(g,side){
    }
   }
   if(placed)continue;
-  for(const x of (side==='player'?[1,0]:[WIDTH-2,WIDTH-1]))for(let y=0;y<HEIGHT&&!placed;y++)
+  for(const x of (u.reserveKind==='deepstrike'?Array.from({length:WIDTH},(_,i)=>i):side==='player'?[1,0]:[WIDTH-2,WIDTH-1]))for(let y=0;y<HEIGHT&&!placed;y++)
    if(canDeployReserve(g,u,x,y)&&deployReserve(g,u.uid,x,y).ok){deployed++;placed=true;}
  }
  return deployed;
@@ -695,7 +864,7 @@ function autoDeployReserves(g,side){
 // Autonomous transport play uses the same disembark restrictions as the player.
 // Cargo exits on round two if an adjacent tile is clear.
 function autoDisembark(g,side){
- if(g.round<2||g.phase!=='movement')return 0;
+ if(g.round<2||!['movement','reinforcements'].includes(g.phase))return 0;
  let count=0;
  for(const cargo of [...embarkedUnits(g,side)]){
   const vehicle=living(g,side).find(v=>v.uid===cargo.transportUid);
@@ -710,7 +879,7 @@ function autoDisembark(g,side){
 function aiTurn(g,side,options={}){
  if(g.finished)return;
  const resume=!!options.resume;
- const phases=['movement','shooting','charge','fight'];
+ const phases=['movement','reinforcements','shooting','charge','fight'];
  const begin=resume?phases.indexOf(g.phase):0;
  if(!resume)startTurn(g,side);
  if(begin<=0&&!g.directed?.[side]){
@@ -719,10 +888,11 @@ function aiTurn(g,side,options={}){
    if(enemies.length)declareDirectedObjective(g,side,enemies[0].uid);}
  }
  if(begin<=0){
+  autoAbilities(g,side);
   autoDisembark(g,side);
   // Movement: seek objectives and nearby threats while respecting obstacles.
   for(const a of living(g,side)){
-   if(a.moved)continue;
+   if(a.moved||template(a).special?.immobile)continue;
    if(a.control==='pursuit'){pursue(g,a);continue;}
    let best=null,bestScore=-Infinity;
    const foes=living(g,side==='player'?'enemy':'player');if(!foes.length)break;
@@ -737,23 +907,23 @@ function aiTurn(g,side,options={}){
    if(best&&(best.x!==old.x||best.y!==old.y)){a.x=best.x;a.y=best.y;a.moved=true;}
   }
  }
- if(begin<=1){
-  if(begin<=0)autoDeployReserves(g,side);
-  g.phase='shooting';
+ if(begin<=1){g.phase='reinforcements';autoDeployReserves(g,side);autoDisembark(g,side);autoAbilities(g,side);}
+ if(begin<=2){
+  g.phase='shooting';autoAbilities(g,side);
   for(const a of [...living(g,side)]){
    if(a.shot)continue;
-   const targets=living(g,side==='player'?'enemy':'player').filter(b=>(a.control!=='pursuit'||nearestEnemy(g,a)?.uid===b.uid)&&distance(a,b)<=template(a).ranged.range&&distance(a,b)>1&&hasLineOfSight(a,b)).sort((x,y)=>distance(a,x)-distance(a,y));
+   const targets=living(g,side==='player'?'enemy':'player').filter(b=>canAttack(g,a.uid,b.uid,'ranged')).sort((x,y)=>distance(a,x)-distance(a,y));
    if(targets.length)attack(g,a.uid,targets[0].uid,'ranged');
   }
  }
- if(begin<=2){
+ if(begin<=3){
   g.phase='charge';
   for(const a of [...living(g,side)]){
    const targets=living(g,side==='player'?'enemy':'player').filter(b=>canCharge(g,a.uid,b.uid)).sort((x,y)=>distance(a,x)-distance(a,y));
    if(targets.length&&distance(a,targets[0])<=4)charge(g,a.uid,targets[0].uid);
   }
  }
- if(begin<=3){
+ if(begin<=4){
   g.phase='fight';
   for(const a of [...living(g,side)]){
    if(a.fought)continue;
@@ -766,9 +936,9 @@ function aiTurn(g,side,options={}){
 function advance(g){
  if(g.finished)return;
  if(g.active!=='player')return;
- const phases=['movement','shooting','charge','fight'];
+ const phases=['movement','reinforcements','shooting','charge','fight'];
  const i=phases.indexOf(g.phase);if(i<0)return;
- if(i<3){
+ if(i<4){
   g.phase=phases[i+1];
   if(g.phase==='charge')for(const u of living(g,'player')){
    if(u.control==='pursuit'){const enemy=nearestEnemy(g,u);if(enemy&&canCharge(g,u.uid,enemy.uid))charge(g,u.uid,enemy.uid);}
@@ -800,6 +970,12 @@ function battleLab(player,enemy,count=10,seed=1111,deployment=null){
 }
 function validateLoadedState(g){
  if(!g||g.version!==2||!Array.isArray(g.units)||g.units.length>28||!g.units.length||!g.score||!Array.isArray(g.log)||!Array.isArray(g.objectives)||g.objectives.length!==3)throw Error('Incompatible save file.');
+ if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
+ for(const [id,version] of Object.entries(g.settings.sourceVersions||{}))if(!BY_ID[id]||(BY_ID[id].sourceVersion||'')!==version)throw Error('Saved battle uses an older New Recruit revision. Rebuild the roster before starting a new battle.');
+ const expected=['player','enemy'].flatMap(side=>g.settings[side].map((id,i)=>({uid:side[0]+i,side,template:id})));
+ if(expected.length!==g.units.length||new Set(g.units.map(u=>u.uid)).size!==g.units.length||
+    expected.some(e=>!g.units.some(u=>u.uid===e.uid&&u.side===e.side&&u.template===e.template)))throw Error('Save contains invalid unit identities that do not match the purchased muster.');
+ if(new Set(g.objectives.map(o=>o.id)).size!==3)throw Error('Save file contains duplicate objectives.');
  if(g.objectives.some(o=>!['A','B','C'].includes(o.id)||!validCell(o.x,o.y)))throw Error('Save file contains invalid objectives.');
  if(g.units.some(u=>!BY_ID[u.template]||!['player','enemy'].includes(u.side)||
   (['reserve','embarked'].includes(u.deployment)?((u.x!==-1||u.y!==-1)&&u.models>0):!validCell(u.x,u.y))||
@@ -812,8 +988,8 @@ function validateLoadedState(g){
   if(!carrier||carrier.side!==u.side||carrier.models<=0||!transportSpec(template(carrier)))
    throw Error('Save has an invalid embarked passenger.');
  }
- if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
- if(g.units.filter(u=>u.models>0).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
+ if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','reinforcements','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
+ if(living(g).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
  if(musterProblems(g.settings.player).length||musterProblems(g.settings.enemy).length)throw Error('Saved muster violates current source catalogue limits.');
  if(g.units.some(u=>u.painPenalty!==undefined&&u.painPenalty!==0&&u.painPenalty!==1))throw Error('Save contains invalid Pain-Control state.');
@@ -830,7 +1006,8 @@ function validateLoadedState(g){
   if(u.leaderAlive&&u.models<1)throw Error('Saved Leader is alive in a destroyed unit.');
  }
  if(g.units.some(u=>u.control!==undefined&&!['controlled','supervised','pursuit'].includes(u.control)))throw Error('Save contains invalid Lost Cohort state.');
+ for(const u of g.units)pinBattleProfile(u);
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,embarkedUnits,canDisembark,disembark,autoDisembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,attackProfiles,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,applyMortalWounds,embarkedUnits,canDisembark,disembark,autoDisembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,abilityOptions,useAbility,attackProfiles,canAttack,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

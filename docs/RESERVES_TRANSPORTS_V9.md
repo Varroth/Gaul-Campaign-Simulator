@@ -1,3 +1,5 @@
+> Historical release notes. See [Alpha 0.10 quality report](QUALITY_REPORT_V10.md) for current behavior and remaining gaps.
+
 # Paid Reserves, Bloodletter Invocation and Ground Transport — Alpha 0.9
 
 **Source of truth:** [Gaul Campaign: Renegades New Recruit catalogue](https://github.com/Varroth/Gaul-Campaign-Renegades), read-only. This stage does not alter the catalogue. Values are also checked against the live XML on every GitHub Actions run.

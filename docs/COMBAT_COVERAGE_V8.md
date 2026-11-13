@@ -1,3 +1,5 @@
+> Historical release notes. See [Alpha 0.10 quality report](QUALITY_REPORT_V10.md) for current behavior and remaining gaps.
+
 # Infernal Warriors — Combat Integration Report (Alpha 0.8)
 
 **Source of truth:** The read-only New Recruit faction catalogue [`Infernal_Warriors.cat`](https://github.com/Varroth/Gaul-Campaign-Renegades/blob/main/Infernal_Warriors.cat). Current baseline: 74 selectable units, source revision 24. GitHub Actions re-checks the latest XML on each simulator update.

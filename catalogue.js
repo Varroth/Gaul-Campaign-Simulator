@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v10';
-const CACHE_VERSION=10;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v11';
+const CACHE_VERSION=11;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.9';
+const RULESET_VERSION='alpha-0.10';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -46,7 +46,7 @@ function parseWeapon(profile,mode){
  const ap=int(field(profile,'AP'));
  const damage=int(field(profile,'D'));
  const dist=int(range);
- return {attacks:bounded(attacks,1,10,2),range:mode==='melee'?1:bounded(dist/2,1,12,5),
+ return {attacks:bounded(attacks,1,100,2),range:mode==='melee'?1:bounded(dist/2,1,12,5),
   s:bounded(strength,2,22,4),ap:bounded(Math.abs(ap),0,5,0),damage:bounded(damage,1,9,1),skill:bounded(skill,2,6,3)};
 }
 function pointsFrom(element){
@@ -107,51 +107,80 @@ function formation(unit){
  const selected=choices.find(e=>e.id===value(group,'defaultSelectionEntryId'))||choices[0];
  return {group,choices,selected};
 }
+// Compile the selected formation into a serializable choice tree. Optional groups
+// stay empty unless selected; nested menus are resolved only in the active branch.
+function resolveEquipment(tree,selections={}){
+ const weapons=[],slots=[],picks={};let points=0;
+ function walk(node){
+  points+=node.points||0;
+  weapons.push(...(node.weapons||[]).map(w=>({...w})));
+  for(const fixed of node.fixed||[])walk(fixed);
+  for(const group of node.groups||[]){
+   const requested=selections[group.id];
+   const id=requested===undefined?group.selectedId:requested;
+   const selected=group.choices.find(c=>c.id===id);
+   if(!selected)throw Error('Invalid equipment choice in '+group.name+'.');
+   picks[group.id]=id;
+   if(group.choices.length>1)slots.push({...group,selectedId:id});
+   walk(selected);
+  }
+ }
+ walk(tree);
+ return {weapons:mergeWeapons(weapons),slots,picks,points};
+}
 function sourceWeapons(doc,unit,form,profileIndex,selections={}){
  const profiles=profileIndex||new Map(descendants(doc.documentElement,'profile').filter(p=>value(p,'id')&&value(p,'typeName')==='Weapon').map(p=>[value(p,'id'),p]));
- const weapons=[],slots=[],maxDepth=45;
+ const omitted=[];
  function directWeapons(current,count){
-  const result=[];
-  for(const link of path(current,'infoLinks','infoLink')){
-   if(value(link,'type')!=='profile')continue;
-   const profile=profiles.get(value(link,'targetId'));
-   if(!profile)continue;
-   const mode=/melee|close combat/i.test(field(profile,'Range'))?'melee':'ranged';
-   const data=parseWeapon(profile,mode);
-   if(data)result.push({...data,mode,name:value(profile,'name'),count,traits:field(profile,'Traits'),sourceProfileId:value(profile,'id'),attackValue:field(profile,'A'),damageValue:field(profile,'D')});
-  }
-  return result;
+  const linked=path(current,'infoLinks','infoLink').filter(l=>value(l,'type')==='profile').map(l=>profiles.get(value(l,'targetId'))).filter(Boolean);
+  const inline=path(current,'profiles','profile').filter(p=>value(p,'typeName')==='Weapon');
+  const all=[...linked,...inline],label=value(current,'name');
+  const branches=new Map();
+  for(const p of all){const n=value(p,'name');const base=n.split(/\s[—–]\s/)[0];branches.set(base,(branches.get(base)||0)+1);}
+  return all.map((profile,i)=>{
+   const name=value(profile,'name'),mode=/melee|close combat/i.test(field(profile,'Range'))?'melee':'ranged';
+   const data=parseWeapon(profile,mode);if(!data)return null;
+   const base=name.split(/\s[—–]\s/)[0];
+   // Explicit weapon multiplicities in fixed vehicle packages are independent
+   // of the vehicle's model count (two lascannons on one Land Raider).
+   const leading=label.match(/^(\d+)\s/);
+   const weaponCopies=count===1&&leading&&i===0&&!/models?|afflicted|regular|thralls?|reavers?|warriors?|marines?|crew|team/i.test(label)?Number(leading[1]):1;
+   return {...data,mode,name,count:count*weaponCopies,traits:field(profile,'Traits'),sourceProfileId:value(profile,'id'),
+    ...(branches.get(base)>1?{alternativeGroup:value(current,'id')+'|'+base}:{}),
+    attackValue:field(profile,'A'),damageValue:field(profile,'D')};
+  }).filter(Boolean);
  }
- function walk(current,multiplier,depth){
-  if(depth>maxDepth)return;
+ const hasWeapons=n=>[n,...descendants(n,'selectionEntry')].some(e=>path(e,'infoLinks','infoLink').some(l=>profiles.has(value(l,'targetId')))||path(e,'profiles','profile').some(p=>value(p,'typeName')==='Weapon'));
+ function build(current,multiplier,depth=0){
+  if(depth>45)throw Error('Equipment nesting exceeds the supported limit.');
   const label=value(current,'name');
-  const countMatch=label.match(/^(\d{1,2})\s+(?:(?:regular|standard|remaining)\s+)?(?:[A-Za-z][^—:]*?)(?:\s+[—:]|\s*—)/);
-  const plainSquadWeapon=label.match(/^(\d{1,2})\s+(?:Hellblades|Hellfangs|Crude blades|Chainaxes)$/i);
-  const count=countMatch&&countMatch[1]&&/regular|standard|thrall|reaver|warrior|marine|troop|servitor|scout/i.test(label)?Math.min(20,Number(countMatch[1])):plainSquadWeapon?Math.min(20,Number(plainSquadWeapon[1])):1;
-  const copies=multiplier*count;
-  weapons.push(...directWeapons(current,copies));
+  const troopCount=label.match(/^(\d{1,2})\s+(?:(?:regular|standard|remaining)\s+)?(?:Thralls?|Reavers?|Warriors?|Marines?|troops?|servitors?|scouts?)\b/i);
+  const squadCount=label.match(/^(\d{1,2})\s+(?:Hellblades|Hellfangs|Crude blades|Chainaxes)$/i);
+  const copies=multiplier*Number(troopCount?.[1]||squadCount?.[1]||1);
+  const node={id:value(current,'id'),label,points:Number.isFinite(pointsFrom(current))?pointsFrom(current):0,weapons:directWeapons(current,copies),groups:[],fixed:[]};
+  for(const entry of path(current,'selectionEntries','selectionEntry'))if(minModels(entry)>0&&value(entry,'hidden')!=='true')node.fixed.push(build(entry,copies*minModels(entry),depth+1));
   for(const group of path(current,'selectionEntryGroups','selectionEntryGroup')){
-   const options=path(group,'selectionEntries','selectionEntry').filter(e=>value(e,'hidden')!=='true');
-   if(!options.length)continue;
-   const selected=options.find(e=>value(e,'id')===value(group,'defaultSelectionEntryId'))||options[0];
-   const candidates=options.map(e=>({id:value(e,'id'),label:value(e,'name'),points:pointsFrom(e),
-    weapons:directWeapons(e,copies),nested:path(e,'selectionEntryGroups','selectionEntryGroup').length>0}));
-   // Only flat, fully resolved equipment alternatives are editable. Nested menus,
-   // enhancements and deployment choices require dedicated rule implementations.
-   const isWargear=options.length>1 && options.length<=45 && candidates.every(o=>o.weapons.length>0&&!o.nested)
-      && /champion|warrior|weapons?|wargear|specialist|reaver|troop|marine|scout|servitor|gunner|turret|pistol|melee/i.test(value(group,'name'));
-   if(isWargear && slots.length<40){
-    slots.push({id:value(group,'id'),name:value(group,'name'),selectedId:value(selected,'id'),
-       choices:candidates.map(({id,label,points,weapons})=>({id,label,points:Number.isFinite(points)?points:0,weapons}))});
+   const name=value(group,'name');
+   if(/required unit size and formation/i.test(name)){
+    if(form?.selected?.element)node.fixed.push(build(form.selected.element,copies,depth+1));
+    continue;
    }
-   const chosen=options.find(e=>value(e,'id')===selections[value(group,'id')])||selected;
-   walk(chosen,copies,depth+1);
+   if(/enhancement|deployment|passenger|leader|requisition|vanguard|insertion|invoker|externally secured/i.test(name))continue;
+   const options=path(group,'selectionEntries','selectionEntry').filter(e=>value(e,'hidden')!=='true');
+   if(!options.length||(!hasWeapons(group)&&!/flight configuration/i.test(name)))continue;
+   const max=path(group,'constraints','constraint').find(c=>value(c,'type')==='max'&&value(c,'field')==='selections');
+   if(max&&int(value(max,'value'))>1){omitted.push(name+': multiple-selection equipment group');continue;}
+   const id=value(group,'id')||'group-'+hash(name),defaultId=value(group,'defaultSelectionEntryId');
+   const required=minModels(group)>0||!!defaultId;
+   const choices=options.map(e=>build(e,copies,depth+1));
+   if(!required)choices.unshift({id:'__none__',label:'None',points:0,weapons:[],groups:[],fixed:[]});
+   node.groups.push({id,name,selectedId:choices.some(c=>c.id===defaultId)?defaultId:choices[0].id,choices});
   }
+  return node;
  }
- walk(form?.selected?.element||unit,1,0);
- const merged=new Map();
- for(const w of weapons){const key=w.mode+'|'+w.sourceProfileId;const prior=merged.get(key);if(prior)prior.count+=w.count;else merged.set(key,{...w});}
- return {weapons:[...merged.values()].slice(0,80),slots};
+ const tree=build(unit,1);
+ const resolved=resolveEquipment(tree,selections);
+ return {...resolved,tree,omitted};
 }
 function isArmouredVehicle(name,category){return /vehicle|tank|dreadnought|daemon engine|artillery|transport|aircraft|land raider|speeder|rhino|predator|vindicat|defiler|crawler|gunship|drop pod|siege engine|automata/i.test(name+' '+category);}
 function collectUnitRoots(doc){
@@ -191,6 +220,13 @@ const ENGINE_ABILITY_NAMES=new Set([
  'Bloodletter Invocation','Passenger Manifest & capacity','Mobile Bastion','Legion Carrier' 
 ]);
 const PARTIAL_ABILITY_NAMES=new Set(['Afflicted Ferocity','Ashen Chain','Relic Plate','Legion Rush','Relic Mobility','Warmaster of the Twice-Condemned','Controlled Fury','Bloodletter Invocation','Passenger Manifest & capacity','Mobile Bastion','Legion Carrier']);
+// Handlers do not establish full tabletop equivalence; these remain partial.
+for(const name of ['Linked Fury','Outflank','Specialist Volley','Wrath Harness','Champion-Seeker','Linked Assault','Suppression Grid',
+ 'Custodian of Engines','Maintenance Crew','Serum Custodian','Neurological Stabilizers','Harbinger of Blood','Battlefield Dislocation',
+ 'Forge Liaison','Iron Column','The Voice Commands','Cohort Handler','Last Order','Skyborne Commander','Ashen Chain Commander',
+ 'Assault Jump Descent','Void-Knife Assault','Breach Veteran','Armoured Breakthrough','Falling Spear','Impact Assault','Shock Fright']){
+ ENGINE_ABILITY_NAMES.add(name);PARTIAL_ABILITY_NAMES.add(name);
+}
 function unitAbilities(unit){
  return path(unit,'profiles','profile').filter(p=>value(p,'typeName')==='Ability').map(p=>({
   name:value(p,'name'),description:field(p,'Description').slice(0,4000),
@@ -229,7 +265,7 @@ function getStats(unit,name,category){
  const m=field(p,'M'),move=bounded(Math.round(int(m)/2),1,8,vehicle?3:3);
  const t=bounded(int(field(p,'T')),2,16,vehicle?9:4);
  const save=bounded(int(field(p,'Sv')),2,6,vehicle?3:3);
- const wp=bounded(int(field(p,'W')),1,24,vehicle?10:2);
+ const wp=bounded(int(field(p,'W')),1,100,vehicle?10:2);
  const ld=bounded(int(field(p,'Ld')),2,9,7);
  const oc=bounded(int(field(p,'OC')),0,10,vehicle?3:2);
  return {move,t,save,wp,oc,ld};
@@ -273,21 +309,22 @@ function isValidLeaderFor(squad,leader){
 function mergeWeapons(weapons){
  const map=new Map();
  for(const w of weapons){if(!w||!Number.isFinite(w.count)||w.count<=0)continue;
-  const key=(w.isLeader?'leader|':'')+w.mode+'|'+(w.sourceProfileId||w.name);
+  const key=(w.isLeader?'leader|':'')+w.mode+'|'+(w.sourceProfileId||w.name)+'|'+(w.alternativeGroup||'');
   const prev=map.get(key);if(prev)prev.count+=w.count;else map.set(key,{...w});
  }
  return [...map.values()].filter(w=>w.count>0).slice(0,80);
 }
-// Configures a linked unit from source-encoded legal formations and FLAT weapon menus.
+// Configures a linked unit from source formations and reachable equipment branches.
 // Other New Recruit selection graphs are not silently guessed or treated as verified.
 function configureUnit(base,config={},leaders=[]){
- if(!base||base.source!=='linked'||base.faction!=='IW'||!Array.isArray(base.formationConfigs)||!base.formationConfigs.length||base.isLeader)throw Error('This datasheet does not support formation editing yet.');
+ if(!base||base.source!=='linked'||base.faction!=='IW'||!Array.isArray(base.formationConfigs)||!base.formationConfigs.length)throw Error('This datasheet does not support formation editing yet.');
  const form=base.formationConfigs.find(f=>f.id===(config.formationId||base.defaultFormationId));
  if(!form)throw Error('Requested formation is not present in the current New Recruit catalogue.');
  if(!Number.isInteger(form.models)||form.models<1||form.models>20)throw Error('Invalid squad size.');
- const picks={},weapons=form.loadout.map(w=>({...w}));
- let extra=0;
- for(const slot of form.slots){
+ const resolved=form.equipmentTree?resolveEquipment(form.equipmentTree,config.gear):null;
+ const picks=resolved?{...resolved.picks}:{},weapons=(resolved?resolved.weapons:form.loadout).map(w=>({...w}));
+ let extra=resolved?resolved.points-(form.equipmentPoints||0):0;
+ for(const slot of resolved?[]:form.slots){
   const requested=config.gear?.[slot.id];
   const selected=slot.choices.find(c=>c.id===(requested||slot.selectedId))||slot.choices[0];
   if(requested&&selected.id!==requested)throw Error('An equipment choice is no longer legal under this formation.');
@@ -308,7 +345,7 @@ function configureUnit(base,config={},leaders=[]){
  if(base.special?.mandatoryChaplain&&base.leader)weapons.push(...(base.leader.loadout||[]).map(w=>({...w,count:1,isLeader:true}))); 
  const sortedGear=Object.fromEntries(Object.entries(picks).sort((a,b)=>a[0].localeCompare(b[0])));
  const key=JSON.stringify([base.id,base.sourceVersion,form.id,sortedGear,leader?.id||'']);
- const variant={...base,id:'cfg-'+base.id.slice(3)+'-'+hash(key),baseId:base.id,
+ const variant={...base,equipmentSlots:resolved?.slots||form.slots,id:'cfg-'+base.id.slice(3)+'-'+hash(key),baseId:base.id,
   selectedFormation:form.id,selectedGear:sortedGear,leaderId:leader?.id||null,
   formationLabel:form.label,bodyguardModels:form.models,models:form.models+((leader||base.special?.mandatoryChaplain&&base.leader)?1:0),
   points:Math.max(1,Math.round((base.rootPoints||0)+(Number.isFinite(form.points)?form.points:base.points)+extra+(leader?.points||0))),
@@ -317,6 +354,10 @@ function configureUnit(base,config={},leaders=[]){
   description:base.description+' · customized formation'+(leader?' with '+leader.name:'')};
  // Alternative formations may encode parent costs only: preserve published starting points.
  if(!Number.isFinite(form.points)||form.points<=0)variant.points=Math.max(1,base.points+extra+(leader?.points||0));
+ if(resolved&&resolved.points>0)variant.points=Math.round(resolved.points+(leader?.points||0));
+ const selectedLabels=resolved?.slots.map(s=>s.choices.find(c=>c.id===s.selectedId)?.label||'').join(' ')||'';
+ if(/Low-Altitude Assault Skimmer/i.test(selectedLabels)){variant.special.aircraft=false;variant.move=7;variant.flightMode='skimmer';}
+ else if(/Aircraft Interdictor/i.test(selectedLabels)){variant.special.aircraft=true;variant.flightMode='aircraft';}
  const ranged=variant.loadout.find(w=>w.mode==='ranged'&&!w.isLeader)||variant.loadout.find(w=>w.mode==='ranged');
  const melee=variant.loadout.find(w=>w.mode==='melee'&&!w.isLeader)||variant.loadout.find(w=>w.mode==='melee');
  if(ranged)variant.ranged={...ranged};if(melee)variant.melee={...melee};
@@ -391,14 +432,16 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   const form=formation(node);
   const linked=sourceWeapons(doc,node,form,profileIndex);
   const isLeader=value(node,'type')==='model'&&leaderTargets(node).length>0;
-  const configs=faction==='IW'&&!isLeader&&form?.choices.length?form.choices.map(c=>{
+  const configs=faction==='IW'&&form?.choices.length?form.choices.map(c=>{
     const one=sourceWeapons(doc,node,{selected:c},profileIndex);
     return {id:c.id,label:c.label,models:c.models,points:c.points,loadout:one.weapons,
-       slots:one.slots.filter(slot=>!!slot.id)};
+       slots:one.slots.filter(slot=>!!slot.id),equipmentTree:one.tree,equipmentPoints:one.points};
    }).filter(c=>Number.isInteger(c.models)&&c.models>=1&&c.models<=20).slice(0,22):[];
   const cat=categoryFor(node),stats=getStats(node,name,cat),models=isLeader?1:countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
+  if(!p.estimated)p.points+=Math.max(0,linked.points-(pointsFrom(node)||0)-(form?.selected?.points||0));
+  if(faction==='IW'&&!configs.length)configs.push({id:'default',label:'Published formation',models,points:p.points-(pointsFrom(node)||0),loadout:linked.weapons,slots:linked.slots,equipmentTree:linked.tree,equipmentPoints:linked.points});
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
-  const vehicle=isArmouredVehicle(name,cat),daemon=/Khorne Allies|\bDAEMON\b/i.test(cat)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell/i.test(name+' '+cat);
+  const vehicle=isArmouredVehicle(name,cat),daemon=/Khorne Allies|\bDAEMON\b/i.test(cat)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell|pexi 270th|tenth company scouts/i.test(name+' '+cat);
   const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,painSensitive:true,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true,painSensitive:false}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
   if(daemon)special.daemon=true;
   const profile=rootProfile(node);
@@ -407,14 +450,19 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   const declaredModels=sourceComposition||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
   const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,abilities:unitAbilities(node),wp:stats.wp,ld:stats.ld,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
    isLeader,leaderTargets:isLeader?leaderTargets(node):[],rosterMax:rosterMaximum(node),wargearLimits:faction==='IW'?wargearLimits(node):[],rootPoints:Number.isFinite(pointsFrom(node))?pointsFrom(node):0,
-   defaultFormationId:form?.selected?.id||null,formationConfigs:configs,
+   defaultFormationId:form?.selected?.id||(configs.length?'default':null),formationConfigs:configs,
    ranged:(()=>{const found=linked.weapons.filter(w=>w.mode==='ranged');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.ranged;})(),
    melee:(()=>{const found=linked.weapons.filter(w=>w.mode==='melee');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.melee;})(),
    loadout:linked.weapons,sizeOptions:form?.choices.map(({id,label,models,points})=>({id,label,models,points}))||[],
-   equipmentMenus:linked.slots,special,source:'linked',revision,estimated:p.estimated,category:cat,
+   equipmentMenus:linked.slots,equipmentSlots:linked.slots,special,source:'linked',revision,estimated:p.estimated,category:cat,
    audit:{points:p.basis,unitStats:fieldCoverage?'source':'fallback',modelCount:declaredModels?'declared':'inferred',ranged:linked.weapons.some(w=>w.mode==='ranged')?'source':weapons.rangedFromSource?'source':'fallback',melee:linked.weapons.some(w=>w.mode==='melee')?'source':weapons.meleeFromSource?'source':'fallback'},
    description:`New Recruit ${cat||'datasheet'} · default squad size and wargear (playtest combat)${p.estimated?' · simulator point estimate':''}.`};
-  unit.auditBlockers=unitAuditBlockers(node,form,profileIndex,unit.abilities);
+  unit.auditBlockers=[...unitAuditBlockers(node,form,profileIndex,unit.abilities),...linked.omitted];
+  unit.keywords=path(node,'categoryLinks','categoryLink').map(c=>value(c,'name'));
+  if(/Has Deep Strike|Deep Strike without/i.test(unit.abilities.map(a=>a.description).join(' ')))unit.special.deepStrike=true;
+  if(/Terminator|Jump|Raptor|Dreadclaw|Kharybdis|Deathstorm/i.test(name))unit.special.deepStrike=true;
+  if(/aircraft|gunship|interceptor|stormbird/i.test(name+' '+cat))unit.special.aircraft=true;
+  if(/Deathstorm/i.test(name))unit.special.immobile=true;
   unit.verification=statusFor(unit,sourceVersion);
   result.push(unit);
  }
@@ -439,9 +487,43 @@ function parseCatalogue(xml,faction,sourceVersion=''){
  if(result.length>MAX_TEMPLATES)throw Error('Catalogue contains unexpectedly many units.');
  return {faction,revision,units:result};
 }
+// Dictionary encoding keeps the complete choice trees within browser storage
+// quotas. This is lossless and accepts only bounded, acyclic cache data.
+function packCache(data){
+ const strings=[],ids=new Map(),objects=[],objectIds=new Map();
+ const intern=s=>{if(!ids.has(s)){ids.set(s,strings.length);strings.push(s);}return ids.get(s);};
+ function encode(v){
+  if(typeof v==='string')return [2,intern(v)];
+  if(v&&typeof v==='object'){
+   const key=JSON.stringify(v);if(objectIds.has(key))return [3,objectIds.get(key)];
+   const a=Array.isArray(v)?[0,...v.map(encode)]:[1];
+   if(!Array.isArray(v))for(const [k,x] of Object.entries(v))if(x!==undefined)a.push(intern(k),encode(x));
+   const id=objects.length;objects.push(a);objectIds.set(key,id);return [3,id];
+  }
+  return v;
+ }
+ const payload=encode(data);return JSON.stringify({packed:2,strings,objects,payload});
+}
+function unpackCache(packed){
+ if(![1,2].includes(packed?.packed))return packed;
+ if(!Array.isArray(packed.strings)||packed.strings.length>200000||packed.strings.some(s=>typeof s!=='string'||s.length>20000))throw Error('Invalid cache dictionary.');
+ let nodes=0;
+ const string=i=>{if(!Number.isInteger(i)||i<0||i>=packed.strings.length)throw Error('Invalid cache reference.');return packed.strings[i];};
+ function decode(v,depth=0){
+  if(++nodes>3000000||depth>100)throw Error('Cache exceeds supported size.');
+  if(!Array.isArray(v))return v;
+  if(v[0]===3&&v.length===2){if(!Array.isArray(packed.objects)||!Number.isInteger(v[1])||v[1]<0||v[1]>=packed.objects.length)throw Error('Invalid object reference.');return decode(packed.objects[v[1]],depth+1);}
+  if(v[0]===2&&v.length===2)return string(v[1]);
+  if(v[0]===0)return v.slice(1).map(x=>decode(x,depth+1));
+  if(v[0]===1&&v.length%2===1){const o={};for(let i=1;i<v.length;i+=2){const k=string(v[i]);if(['__proto__','constructor','prototype'].includes(k))throw Error('Invalid cache key.');o[k]=decode(v[i+1],depth+1);}return o;}
+  throw Error('Invalid packed cache.');
+ }
+ return decode(packed.payload);
+}
 function readCache(storage){
  try{
-  const data=JSON.parse((storage||localStorage).getItem(CACHE_KEY)||'null');
+  const raw=(storage||localStorage).getItem(CACHE_KEY)||'null';if(raw.length>12000000)return null;
+  const data=unpackCache(JSON.parse(raw));
   if(data?.v!==CACHE_VERSION||!data.cachedAt||Date.now()-data.cachedAt>MAX_CACHE_AGE)return null;
   if(!data.catalogues||typeof data.catalogues!=='object')return null;
   for(const [f,x] of Object.entries(data.catalogues)){
@@ -456,7 +538,7 @@ function readCache(storage){
   return data;
  }catch(e){return null;}
 }
-function writeCache(data,storage){try{(storage||localStorage).setItem(CACHE_KEY,JSON.stringify(data));return true;}catch(e){return false;}}
+function writeCache(data,storage){try{(storage||localStorage).setItem(CACHE_KEY,packCache(data));return true;}catch(e){return false;}}
 async function fetchJson(url,request){const resp=await request(url,{cache:'no-store',credentials:'omit'});if(!resp.ok)throw Error(`GitHub returned HTTP ${resp.status}`);return resp.json();}
 async function fetchText(url,request){const resp=await request(url,{cache:'no-store',credentials:'omit'});if(!resp.ok)throw Error(`Catalogue request returned HTTP ${resp.status}`);return resp.text();}
 async function readVersions(request){
@@ -475,6 +557,15 @@ async function readVersions(request){
   return {versions,source:'catalogue manifest'};
  }
 }
+async function verifySourceVersion(xml,version){
+ if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(version))return;
+ if(!globalThis.crypto?.subtle)throw Error('A secure browser context is required to verify catalogue revisions.');
+ const bytes=new TextEncoder().encode(xml);
+ let input=bytes,algorithm='SHA-256';
+ if(version.length===40){const header=new TextEncoder().encode('blob '+bytes.length+'\0');input=new Uint8Array(header.length+bytes.length);input.set(header);input.set(bytes,header.length);algorithm='SHA-1';}
+ const digest=Array.from(new Uint8Array(await crypto.subtle.digest(algorithm,input)),b=>b.toString(16).padStart(2,'0')).join('');
+ if(digest!==version.toLowerCase())throw Error('The source changed during sync. Sync again to load a matching revision.');
+}
 async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=()=>{}}={}){
  const cached=readCache(storage),data=cached||{v:CACHE_VERSION,cachedAt:Date.now(),catalogues:{}};
  let versions,versionSource;
@@ -487,16 +578,17 @@ async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=
   onStatus({type:'loading',faction:f,message:`Loading ${f} from New Recruit…`});
   try{
    const xml=await fetchText(RAW+file+'?v='+encodeURIComponent(versions[f]),request);
+   await verifySourceVersion(xml,versions[f]);
    const parsed=parseCatalogue(xml,f,versions[f]);
    if(!parsed.units.length&&f!=='ST')throw Error('No playable root units were found.');
    data.catalogues[f]={version:versions[f],revision:parsed.revision,units:parsed.units};
-   data.cachedAt=Date.now();writeCache(data,storage);
+   data.cachedAt=Date.now();if(!writeCache(data,storage))onStatus({type:'cache-warning',message:'Units loaded, but browser storage is full. Offline reuse is unavailable until space is freed.'});
    changed++;onUpdate(f,parsed.units);onStatus({type:'loaded',faction:f,count:parsed.units.length,revision:parsed.revision});
   }catch(error){failed++;onStatus({type:'error',faction:f,message:`${f}: ${error.message}`,cached:!!data.catalogues[f]});}
  }
- if(changed===0&&failed===0){data.cachedAt=Date.now();writeCache(data,storage);}
+ if(changed===0&&failed===0){data.cachedAt=Date.now();if(!writeCache(data,storage))onStatus({type:'cache-warning',message:'Units loaded, but browser storage is full. Offline reuse is unavailable until space is freed.'});}
  const counts=Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]));
  return {ok:failed===0,changed,failed,counts,versionSource,cached:!!cached};
 }
-return {REPOSITORY,FILES,CACHE_KEY,CACHE_VERSION,RULESET_VERSION,VERIFIED_LEDGER,formation,sourceWeapons,configureUnit,isValidLeaderFor,rosterMaximum,wargearLimits,enforceWargearLimits,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,sync,readVersions};
+return {REPOSITORY,FILES,CACHE_KEY,CACHE_VERSION,RULESET_VERSION,VERIFIED_LEDGER,formation,sourceWeapons,resolveEquipment,configureUnit,isValidLeaderFor,rosterMaximum,wargearLimits,enforceWargearLimits,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,packCache,unpackCache,verifySourceVersion,sync,readVersions};
 });

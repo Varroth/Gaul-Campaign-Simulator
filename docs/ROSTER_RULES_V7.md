@@ -1,3 +1,5 @@
+> Historical release notes. See [Alpha 0.10 quality report](QUALITY_REPORT_V10.md) for current behavior and remaining gaps.
+
 # Infernal Warriors roster limits and weapon effects — Alpha 0.7
 
 Source: `Varroth/Gaul-Campaign-Renegades`, `Infernal_Warriors.cat` revision 24, with live SHA-based syncing. The source never receives writes from the simulator.

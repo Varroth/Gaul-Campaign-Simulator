@@ -1,3 +1,5 @@
+> Historical release notes. See [Alpha 0.10 quality report](QUALITY_REPORT_V10.md) for current behavior and remaining gaps.
+
 # Infernal Warriors — Configurable Musters (Alpha 0.6)
 
 This is **not** an exact BattleScribe/New Recruit selection graph renderer or a fully verified Warhammer rules implementation. It is an incremental improvement to the Gaul Campaign tactical simulator, with an auditable source revision and explicit simplifying assumptions.

@@ -1,0 +1,12 @@
+{
+  "name": "gaul-campaign-simulator",
+  "private": true,
+  "version": "0.10.0",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "qc:catalogues": "node scripts/qc_catalogues.cjs"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "0.9.12"
+  }
+}

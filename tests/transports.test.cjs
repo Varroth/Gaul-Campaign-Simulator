@@ -43,9 +43,9 @@ test('capacity checks are shared across all squads assigned to one vehicle',()=>
  assert.deepEqual(E.normalizeDeployment(valid,m),valid);
  assert.throws(()=>E.normalizeDeployment({player:['field','embark:0','embark:0','embark:0'],enemy:['field']},{player:[rhino.id,squad.id,squad.id,squad.id],enemy:['ad-breach']}),/overloaded/);
 });
-test('cannot embark without separately paid carrier or into carrier in Reserves',()=>{
+test('carrier is separately paid and may transport passengers from Reserves',()=>{
  assert.throws(()=>E.normalizeDeployment({player:['field','embark:0'],enemy:['field']},{player:[squad.id,squad.id],enemy:['ad-breach']}),/ineligible/);
- assert.throws(()=>E.normalizeDeployment({player:['reserve','embark:0'],enemy:['field']},{player:[rhino.id,squad.id],enemy:['ad-breach']}),/on the battlefield/);
+ assert.deepEqual(E.normalizeDeployment({player:['reserve','embark:0'],enemy:['field']},{player:[rhino.id,squad.id],enemy:['ad-breach']}).player,['reserve','embark:0']);
 });
 test('passengers are off-board and cannot independently attack until they disembark',()=>{
  const g=E.createGame({player:[rhino.id,squad.id],enemy:['ad-breach'],
@@ -55,13 +55,13 @@ test('passengers are off-board and cannot independently attack until they disemb
  assert.equal(passenger.x,-1);
  g.phase='shooting';assert.equal(E.attack(g,passenger.uid,enemy.uid,'ranged').ok,false);
 });
-test('disembark must be adjacent to a stationary carrier during movement',()=>{
+test('disembark allows a normal move but forbids an advancing carrier',()=>{
  const g=E.createGame({player:[rhino.id,squad.id],enemy:['ad-breach'],
   deployment:{player:['field','embark:0'],enemy:['field']}});
  const carrier=g.units[0],passenger=g.units[1];
  assert.equal(E.disembark(g,passenger.uid,5,3).ok,false);
- carrier.moved=true;assert.equal(E.disembark(g,passenger.uid,1,3).ok,false);
- carrier.moved=false;assert.equal(E.disembark(g,passenger.uid,1,3).ok,true);
+ carrier.advancing=true;assert.equal(E.disembark(g,passenger.uid,1,3).ok,false);
+ carrier.advancing=false;assert.equal(E.disembark(g,passenger.uid,1,3).ok,true);
  assert.equal(passenger.deployment,'field');assert.equal(passenger.transportUid,null);
  assert.equal(E.embarkedUnits(g,'player').length,0);
 });

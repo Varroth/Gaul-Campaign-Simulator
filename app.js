@@ -24,10 +24,10 @@ function tab(name){
  if(name==='builder')renderBuilder();if(name==='lab')renderLab();if(name==='battle')renderBattle();
 }
 function message(text,isError=false){state.feedback=text;state.feedbackError=isError;const box=$('battle-feedback');box.textContent=text;box.classList.toggle('error',isError);}
-function phaseLabel(phase){return ({movement:'Movement',shooting:'Shooting',charge:'Charge',fight:'Fight',finished:'Concluded'})[phase]||phase;}
+function phaseLabel(phase){return ({movement:'Movement',reinforcements:'Reinforcements',shooting:'Shooting',charge:'Charge',fight:'Fight',finished:'Concluded'})[phase]||phase;}
 function renderScore(){
  const g=state.game,player=E.living(g,'player'),enemy=E.living(g,'enemy'),playerReserves=E.reserveUnits(g,'player'),enemyReserves=E.reserveUnits(g,'enemy'),playerEmbarked=E.embarkedUnits(g,'player'),enemyEmbarked=E.embarkedUnits(g,'enemy');
- const pTotal=E.total(state.musters.player),eTotal=E.total(state.musters.enemy);
+ const pTotal=g.units.filter(u=>u.side==='player').reduce((n,u)=>n+tFor(u).points,0),eTotal=g.units.filter(u=>u.side==='enemy').reduce((n,u)=>n+tFor(u).points,0);
  $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} field / ${playerReserves.length} reserve / ${playerEmbarked.length} embarked · ${pTotal} pts</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
  <div class="score center"><div class="score-title">BATTLE ROUND ${Math.min(g.round,E.MAX_ROUNDS)} / ${E.MAX_ROUNDS}</div><div class="metric">${phaseLabel(g.phase)}</div><div class="score-sub">${g.finished?(g.winner==='draw'?'DRAW':(g.winner==='player'?'FRIENDLY':'OPPOSING')+' VICTORY'):'Your turn'}</div></div>
  <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} field / ${enemyReserves.length} reserve / ${enemyEmbarked.length} embarked · ${eTotal} pts</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
@@ -36,9 +36,9 @@ function isTargetable(attacker,target){
  const g=state.game;
  if(g.finished||!attacker||!target||attacker.models===0||attacker.side!=='player'||target.side!=='enemy'||target.models===0)return false;
  const dist=E.distance(attacker,target),t=tFor(attacker);
- if(g.phase==='shooting')return !attacker.shot&&dist>1&&dist<=t.ranged.range&&E.hasLineOfSight(attacker,target);
+ if(g.phase==='shooting')return E.canAttack(g,attacker.uid,target.uid,'ranged');
  if(g.phase==='charge')return E.canCharge(g,attacker.uid,target.uid);
- if(g.phase==='fight')return !attacker.fought&&dist<=t.melee.range;
+ if(g.phase==='fight')return E.canAttack(g,attacker.uid,target.uid,'melee');
  return false;
 }
 function shortName(t){return (t.name.split(/\s+/).filter(w=>!/^(the|of|and)$/i.test(w)).map(w=>w[0]).slice(0,2).join('')||t.name.slice(0,2)).toUpperCase();}
@@ -72,7 +72,8 @@ function renderInspector(){
  ${t.leader?`<p class="muted">Attached ${html(t.leader.name)}: ${u.leaderAlive!==false?`${Math.max(0,t.leader.wp-(u.leaderInjury||0))} / ${t.leader.wp} W remaining`:'destroyed'}${t.leader.bundled?' · points already included in formation':''}</p>`:''}
  ${t.special?.lost&&t.special?.mandatoryChaplain?`<p class="muster-rule-warning">Lost Cohort control: ${html(u.control||'controlled')}${u.leaderAlive===false?' · original Chaplain lost':''}. Objective Control retained unless Battle-shocked.</p>`:''}
  ${u.battleshocked?'<p class="muster-rule-warning">Battle-shocked: 0 Objective Control until next Command phase.</p>':''}
- ${u.side==='player'&&state.game.phase==='movement'&&!u.moved&&!u.advancing?`<button type="button" class="tiny-button" data-advance-unit="${html(u.uid)}">Advance (roll D6, restrict shooting/charge)</button>`:''}
+ ${u.side==='player'&&state.game.phase==='movement'&&!t.special?.immobile&&!u.moved&&!u.advancing?`<button type="button" class="tiny-button" data-advance-unit="${html(u.uid)}">Advance (roll D6, restrict shooting/charge)</button>`:''}
+ ${u.side==='player'?E.abilityOptions(state.game,u.uid).map(a=>`<button type="button" class="tiny-button" data-ability-owner="${html(u.uid)}" data-ability-name="${html(a.name)}" data-ability-target="${html(a.targetId)}">${html(a.label)}</button>`).join(''):''}
  ${u.advancing?`<p class="muted">Advanced +${u.advanceRoll} inches this turn: only Assault weapons may shoot; cannot charge.</p>`:''}
  ${t.abilities?.length?`<details class="unit-audit"><summary>Source abilities &amp; combat coverage</summary><ul>${t.abilities.filter(a=>!/^ROSTER CARD/.test(a.name)).slice(0,30).map(a=>`<li><strong>${a.coverage==='modeled'?'Modeled':a.coverage==='partial'?'Partial':'Reference only'}</strong> — ${html(a.name)}: ${html(a.description.slice(0,360))}</li>`).join('')}</ul></details>`:''}
  ${u.side==='enemy'&&state.game.active==='player'&&state.game.phase==='movement'&&state.game.directed?.player!==u.uid?`<button type="button" class="tiny-button" data-direct-target="${html(u.uid)}">Mark as Directed Objective</button>`:''}
@@ -82,15 +83,15 @@ function renderInspector(){
 function renderReserves(){
  const el=$('reserves-panel');if(!el)return;
  const g=state.game,waiting=E.reserveUnits(g,'player'),cargo=E.embarkedUnits(g,'player');
- const canAct=!g.finished&&g.phase==='movement'&&g.active==='player';
+ const canAct=!g.finished&&g.phase==='reinforcements'&&g.active==='player';
  const invokers=E.living(g,'player').filter(u=>E.template(u).name==='Bloodmarked Thralls'&&!u.battleshocked);
  const reserves=waiting.length?waiting.map(u=>{
   const name=html(E.template(u).name),canDeploy=canAct&&g.round>=2,canInvoke=canDeploy&&name==='Bloodletters'&&invokers.length&&!g.invocationUsed?.player;
-  return `<div class="reserve-unit"><strong>${name}</strong><div class="reserve-unit-buttons"><button type="button" class="tiny-button" data-deploy-reserve="${html(u.uid)}" ${!canDeploy?'disabled':''}>Deploy from edge</button>${canInvoke?invokers.map(t=>`<button type="button" class="tiny-button" data-invoke-reserve="${html(u.uid)}" data-invoker="${html(t.uid)}">Invoke via Thralls ${html(t.uid)}</button>`).join(''):''}</div></div>`;
+  return `<div class="reserve-unit"><strong>${name}</strong><div class="reserve-unit-buttons"><button type="button" class="tiny-button" data-deploy-reserve="${html(u.uid)}" ${!canDeploy?'disabled':''}>${u.reserveKind==='deepstrike'?'Deep Strike':'Deploy from edge'}</button>${canInvoke?invokers.map(t=>`<button type="button" class="tiny-button" data-invoke-reserve="${html(u.uid)}" data-invoker="${html(t.uid)}">Invoke via Thralls ${html(t.uid)}</button>`).join(''):''}</div></div>`;
  }).join(''):'<p class="muted">No friendly units in Reserves.</p>';
  const passengers=cargo.length?cargo.map(u=>{
   const vehicle=g.units.find(v=>v.uid===u.transportUid);
-  const enabled=canAct&&vehicle?.models>0&&vehicle.deployment==='field'&&!vehicle.moved;
+  const enabled=!g.finished&&['movement','reinforcements'].includes(g.phase)&&vehicle?.models>0&&vehicle.deployment==='field'&&!vehicle.advancing;
   return `<div class="reserve-unit"><strong>${html(E.template(u).name)}</strong><p class="muted">Embarked in ${html(vehicle?E.template(vehicle).name:'missing transport')}</p><button type="button" class="tiny-button" data-disembark="${html(u.uid)}" ${!enabled?'disabled':''}>Disembark</button></div>`;
  }).join(''):'';
  el.innerHTML=reserves+(passengers?'<p class="eyebrow" style="margin-top:12px">EMBARKED PASSENGERS</p>'+passengers:'')+
@@ -110,7 +111,7 @@ function renderBattle(){
  const g=state.game;
  if(state.selected&&!E.living(g).some(u=>u.uid===state.selected))state.selected=null;
  renderScore();renderBoard();renderInspector();renderReserves();renderObjectives();renderFeed();
- const instructions={movement:'Move each selected friendly unit once. Green tiles are reachable.',shooting:'Select a friendly shooter, then click an enemy in range. Orange tiles are legal targets.',charge:'Select a friendly unit, then click an enemy to attempt a 2D6 charge.',fight:'Select a friendly unit and click an adjacent enemy to strike.',finished:'Battle complete. Restart, edit your armies, or export the report.'};
+ const instructions={movement:'Move each selected friendly unit once. Green tiles are reachable.',reinforcements:'End of Movement: deploy paid Reserves, use Bloodletter Invocation, or disembark arriving passengers. Then continue to Shooting.',shooting:'Select a friendly shooter, then click an enemy in range. Orange tiles are legal targets.',charge:'Select a friendly unit, then click an enemy to attempt a 2D6 charge.',fight:'Select a friendly unit and click an adjacent enemy to strike.',finished:'Battle complete. Restart, edit your armies, or export the report.'};
  $('phase-hint').textContent=state.placement?'Choose a highlighted square for '+(state.placement.kind==='invocation'?'Bloodletter Invocation.':state.placement.kind==='disembark'?'Disembarkation.':'Reserve arrival.')+' Select Cancel to exit.':instructions[g.phase];
  $('next-phase').disabled=g.finished;$('next-phase').textContent=g.phase==='fight'?'End turn →':'Next phase →';
  $('auto-finish').disabled=g.finished;
@@ -149,7 +150,7 @@ function resetBattle(){
  try{state.game=E.createGame({player:state.musters.player,enemy:state.musters.enemy,deployment:state.deployment,seed:Date.now()>>>0});state.selected=null;state.placement=null;message('New battle deployed. Select a friendly unit.');renderBattle();tab('battle');}
  catch(err){message(err.message,true);tab('battle');}
 }
-function configurable(t){const base=E.BY_ID[t?.baseId]||t;return !!(LIVE&&base?.faction==='IW'&&!base.isLeader&&base.source==='linked'&&base.formationConfigs?.length);}
+function configurable(t){const base=E.BY_ID[t?.baseId]||t;return !!(LIVE&&base?.faction==='IW'&&base.source==='linked'&&base.formationConfigs?.length);}
 function showConfig(side,index){
  const t=E.BY_ID[state.musters[side]?.[index]];
  if(!configurable(t))return '';
@@ -159,10 +160,10 @@ function showConfig(side,index){
  const opts=(arr,chosen)=>arr.map(x=>`<option value="${html(x.id)}" ${x.id===chosen?'selected':''}>${html(x.label||x.name)}${Number.isFinite(x.points)?` · ${x.points} pts`:''}</option>`).join('');
  const select=(label,kind,slotId,choices,selected)=>`<label>${html(label)}<select data-config-kind="${kind}" data-config-side="${side}" data-config-index="${index}" ${slotId?`data-config-slot="${html(slotId)}"`:''}>${opts(choices,selected)}</select></label>`;
  return `<div class="muster-editor" role="group" aria-label="Configure ${html(base.name)}">
- <p class="muted">Selections follow the published squad-size options and flat weapon menus. Unimplemented restrictions or abilities still require New Recruit validation.</p>
+ <p class="muted">Selections follow the published squad-size options and nested equipment menus. Unimplemented restrictions or abilities still require New Recruit validation.</p>
  ${base.wargearLimits?.length?`<p class="muted">Source-enforced wargear quotas: ${base.wargearLimits.map(x=>html(x.description)).join(" · ")}</p>`:""}
  ${select('Squad size','formation',null,base.formationConfigs.map(f=>({...f,label:`${f.label}`})),form.id)}
- <div class="gear-editor">${form.slots.map(slot=>select(slot.name,'gear',slot.id,slot.choices,gear[slot.id]||slot.selectedId)).join('')}</div>
+ <div class="gear-editor">${(t.equipmentSlots||form.slots).map(slot=>select(slot.name,'gear',slot.id,slot.choices,gear[slot.id]||slot.selectedId)).join('')}</div>
  ${!base.special?.mandatoryChaplain&&leaderOptions.length?select('Attached Leader (paid once)','leader',null,[{id:'',label:'None',points:0},...leaderOptions.map(x=>({...x,label:x.name}))],t.leaderId||''):''}
  ${base.special?.mandatoryChaplain?'<p class="muted">This Lost Cohort formation already includes its mandatory Chaplain cost; its Chaplain has independent wounds and can be targeted by Precision weapons. No duplicate Leader is added.</p>':''}
  <p class="muted">The attached Leader acts within this squad on the battlefield (simplified last-survivor and wounds rules).</p></div>`;
@@ -183,7 +184,7 @@ function updateConfiguration(side,index,kind,selected,slotId){
   E.registerConfiguration(variant);
   const updated=[...state.musters[side]];updated[index]=variant.id;
   const errors=E.musterProblems(updated);if(errors.length)throw Error(errors[0]);
-  state.musters[side]=updated;renderBuilder();
+  state.musters[side]=updated;if(variant.special?.aircraft&&state.deployment[side][index]==='field')state.deployment[side][index]='reserve';renderBuilder();
  }catch(error){showSyncStatus('Configuration rejected',error.message);renderBuilder();}
 }
 function configuredSpecs(){
@@ -222,7 +223,7 @@ function renderBuilder(){
   const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
   return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
  ${state.musters[s].length?state.musters[s].map((id,i)=>{const t=E.BY_ID[id],base=E.BY_ID[t?.baseId]||t,stale=!!(t?.baseId&&t.sourceVersion!==base?.sourceVersion);
-  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option>${state.musters[s].flatMap((vehicleId,j)=>{
+  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${t?.special?.aircraft||t?.special?.immobile?'disabled':''} ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option>${t?.special?.deepStrike?`<option value="deepstrike" ${state.deployment[s][i]==='deepstrike'?'selected':''}>Deep Strike</option>`:''}${state.musters[s].flatMap((vehicleId,j)=>{
  const carrier=E.BY_ID[vehicleId],space=j===i?null:E.passengerSpaces(t,carrier);
  return space!==null&&E.transportSpec(carrier)?[`<option value="embark:${j}" ${state.deployment[s][i]==='embark:'+j?'selected':''}>Embark: ${html(carrier.name)} #${j+1} (${space} spaces)</option>`]:[];
 }).join('')}</select></label></span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
@@ -244,13 +245,14 @@ async function syncCatalogues(force=false){
  state.syncRunning=true;
  $('refresh-catalogues').disabled=true;
  showSyncStatus('Checking New Recruit catalogues…','Changes in the source repository are detected when the simulator opens or when you select Sync latest units.');
- const failures=[];
+ const failures=[],cacheWarnings=[];
  try{
   const result=await LIVE.sync({force,
    onUpdate(f,units){E.registerLinked(f,units);state.linkedCounts[f]=units.length;renderBuilder();},
    onStatus(info){
     if(info.type==='loading')showSyncStatus(info.message,'Downloading and reading the latest published New Recruit datasheet entries.');
     if(info.type==='error')failures.push(info.message);
+    if(info.type==='cache-warning')cacheWarnings.push(info.message);
     if(info.type==='loaded')showSyncStatus(`Loaded ${E.FACTIONS[info.faction].name}: ${info.count} units`,`New Recruit catalogue revision ${info.revision||'unknown'} · translated to simplified simulator battle profiles.`);
    }
   });
@@ -258,6 +260,7 @@ async function syncCatalogues(force=false){
   if(result.ok){showSyncStatus(`New Recruit connection current · ${summary||'No units published'}`,
    result.changed?`Updated ${result.changed} faction catalogue(s) from ${result.versionSource}. Reloading the website later automatically checks for new units.`:'No changes since the last check. Your local catalogue cache is current.');}
   else showSyncStatus(`Using ${summary?'cached and playtest':'playtest'} units · source check incomplete`,failures.join(' | ')||result.error||'GitHub source unavailable; previous units remain available.');
+  if(cacheWarnings.length)showSyncStatus('Units loaded · offline cache unavailable',cacheWarnings[0]);
  }catch(error){showSyncStatus('Catalogue synchronization unavailable',`${error.message}. Existing units remain selectable.`);}
  finally{state.lastSyncCheck=Date.now();state.syncRunning=false;$('refresh-catalogues').disabled=false;renderBuilder();}
 }
@@ -266,7 +269,7 @@ function addUnit(id){
  if(!t||arr.length>=14||E.total(arr)+t.points>state.pointsLimit)return;
  const errors=E.musterProblems([...arr,id]);
  if(errors.length){showSyncStatus('Roster limit reached',errors[0]);return;}
- arr.push(id);state.deployment[state.editor].push('field');renderBuilder();
+ arr.push(id);state.deployment[state.editor].push(t.special?.aircraft||t.special?.immobile?'reserve':'field');renderBuilder();
 }
 function removeUnit(side,i){if(!['player','enemy'].includes(side)||!Number.isInteger(i)||i<0||i>=state.musters[side].length)return;state.musters[side].splice(i,1);state.deployment[side].splice(i,1);
  state.deployment[side]=state.deployment[side].map(mode=>{
@@ -321,6 +324,7 @@ function bind(){
  $('refresh-catalogues').addEventListener('click',()=>syncCatalogues(true));
  $('unit-catalogue').addEventListener('click',ev=>{const b=ev.target.closest('[data-add]');if(b)addUnit(b.dataset.add);});
  $('selected-unit').addEventListener('click',ev=>{
+  const ability=ev.target.closest('[data-ability-owner]');if(ability){const result=E.useAbility(state.game,ability.dataset.abilityOwner,ability.dataset.abilityName,ability.dataset.abilityTarget);message(result.ok?'Ability used.':result.message,!result.ok);renderBattle();return;}
   const advancing=ev.target.closest('[data-advance-unit]');if(advancing){
    const result=E.beginAdvance(state.game,advancing.dataset.advanceUnit);
    message(result.ok?`Advance roll: ${result.roll}. Select a destination square.`:result.message,!result.ok);
