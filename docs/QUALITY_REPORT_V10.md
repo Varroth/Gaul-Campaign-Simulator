@@ -2,6 +2,8 @@
 
 This report covers software behavior and source import integrity. It does **not** certify full tabletop rules fidelity. No unit has been promoted to Verified.
 
+Release checks: **190 automated regression tests**, all six source audits, the complete catalogue execution checks below, and four Chromium browser test scripts. The CI workflow uses Node 24-compatible GitHub Actions; the engine regression job runs Node 22.
+
 ## Source snapshot
 
 Read-only source repository commit: `22d3ef1d06ca755118e75e0fc02648fca6b1c183`.

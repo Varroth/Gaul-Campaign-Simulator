@@ -156,7 +156,7 @@ function musterProblems(ids){
 
 // Deployment settings use roster indices, since squads with the same datasheet
 // may be purchased separately. Missing settings preserve old battles exactly.
-// Only source-identified ground carriers are supported in the first transport pass.
+// Capacities are gated by the matching source description; flight remains abstracted.
 function transportSpec(t){
  if(!t||t.source!=='linked'||t.faction!=='IW')return null;
  const table={
@@ -784,7 +784,7 @@ function canCharge(g,aid,bid){
  return distance(a,b)>=2 && distance(a,b)*2<=12;
 }
 function charge(g,aid,bid){
- if(!canCharge(g,aid,bid))return {ok:false,message:'Charge unavailable. Select a target 2–7 squares away.'};
+ if(!canCharge(g,aid,bid))return {ok:false,message:'Charge unavailable. Check the charge phase, movement restrictions and a target 2–6 squares away.'};
  const a=g.units.find(u=>u.uid===aid),b=g.units.find(u=>u.uid===bid);a.charged=true;
  let first=d6(g),second=d6(g),roll=first+second+(a.transportChargeBonus||0);
  const adj=[[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dy])=>({x:b.x+dx,y:b.y+dy})).filter(p=>walkable(g,p.x,p.y,a.uid)).map(p=>({...p,steps:pathDistance(g,a,p.x,p.y)})).sort((a,b)=>a.steps-b.steps);

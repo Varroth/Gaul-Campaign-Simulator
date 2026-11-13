@@ -224,7 +224,7 @@ const PARTIAL_ABILITY_NAMES=new Set(['Afflicted Ferocity','Ashen Chain','Relic P
 for(const name of ['Linked Fury','Outflank','Specialist Volley','Wrath Harness','Champion-Seeker','Linked Assault','Suppression Grid',
  'Custodian of Engines','Maintenance Crew','Serum Custodian','Neurological Stabilizers','Harbinger of Blood','Battlefield Dislocation',
  'Forge Liaison','Iron Column','The Voice Commands','Cohort Handler','Last Order','Skyborne Commander','Ashen Chain Commander',
- 'Assault Jump Descent','Void-Knife Assault','Breach Veteran','Armoured Breakthrough','Falling Spear','Impact Assault','Shock Fright']){
+ 'Assault Descent','Void Knife','Breach Veteran','Armoured Breakthrough','Falling Spear','Impact Assault','Shock Fright']){
  ENGINE_ABILITY_NAMES.add(name);PARTIAL_ABILITY_NAMES.add(name);
 }
 function unitAbilities(unit){

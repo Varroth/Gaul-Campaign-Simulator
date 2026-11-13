@@ -79,7 +79,7 @@ const memory=new Map();
 check('offline cache within standard browser quota',()=>{
  const storage={setItem:(k,v)=>{report.cacheBytes=v.length*2;assert.ok(report.cacheBytes<5*1024*1024,'Cache exceeds 5 MiB');memory.set(k,v);},getItem:k=>memory.get(k)};
  assert.equal(C.writeCache(cache,storage),true);const restored=C.readCache(storage);assert.ok(restored,'Cache read failed');
- for(const f of Object.keys(cache.catalogues))assert.equal(restored.catalogues[f].units.length,cache.catalogues[f].units.length);
+ for(const f of Object.keys(cache.catalogues))assert.equal(JSON.stringify(restored.catalogues[f].units),JSON.stringify(cache.catalogues[f].units),'Cache changed profile data for '+f);
 });
 check('paid reserve transport manifest survives save and complete battle',()=>{
  const carrier=byName('Dreadclaw Drop Pod'),squad=byName('Despoiler Cadre');
