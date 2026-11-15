@@ -74,7 +74,12 @@ check('uninducted Tenth Company Scouts receive no Infernal Serum',()=>{for(const
 check('Mastodon retains all thirty published wounds',()=>assert.equal(byName('Mastodon Heavy Transport').wp,30));
 check('Fellblade retains all twenty-six published wounds',()=>assert.equal(byName('Fellblade Super-heavy').wp,26));
 check('source Deathstorm cannot move after landing',()=>assert.equal(byName('Deathstorm Drop Pod').special.immobile,true));
-check('source all twelve transport capacities',()=>assert.equal(iw.filter(u=>E.transportSpec(u)).length,12));
+check('source all thirteen transport capacities',()=>assert.equal(iw.filter(u=>E.transportSpec(u)).length,13));
+check('Astartes Assault Drop Pod has capacity and immobile Deep Strike',()=>{const t=byName('Astartes Assault Drop Pod');assert.equal(E.transportSpec(t).capacity,10);assert.equal(t.special.immobile,true);assert.equal(t.special.deepStrike,true);});
+check('own daemon engines do not consume the allied daemon allowance',()=>assert.deepEqual(E.musterProblems([byName('Defiler').id]),[]));
+for(const [f,name,models,points] of [['FC','Company Captain',1,90],['FC','Frostbound Line Section',10,80],['AD','Blackout Breachers',5,110],['AD','Unmarked Scout Squad',10,140],['AD','Directorate Breach Cell',5,60],['AD','Shadow Operative Cell',5,65]])check(name+' selected models and points',()=>{
+ const unit=cache.catalogues[f].units.find(u=>u.name===name);assert.equal(unit.models,models);assert.equal(unit.points,points);
+});
 const memory=new Map();
 check('offline cache within standard browser quota',()=>{
  const storage={setItem:(k,v)=>{report.cacheBytes=v.length*2;assert.ok(report.cacheBytes<5*1024*1024,'Cache exceeds 5 MiB');memory.set(k,v);},getItem:k=>memory.get(k)};

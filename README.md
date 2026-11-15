@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.10
+# Gaul Campaign Simulator — Alpha 0.10.1
 
 An unofficial tactical playtest for Gaul Campaign: Renegades.
 
@@ -12,10 +12,12 @@ The current source contains **326 imported profiles**: 96 Infernal Warriors (74 
 
 A source refresh does not change the profiles of a battle already underway. Saved linked battles pin source revisions and reject incompatible changed catalogues rather than silently changing the army.
 
-## Alpha 0.10 changes
+## Alpha 0.10.1 changes
+
+The final live-site pass also corrected per-model cost duplication, active personnel-branch counts, the allied-daemon cap for the army's own engines, the standard Assault Drop Pod, and cache migration from earlier versions.
 
 - Nested Infernal Warriors equipment choices, including optional vehicle guns, with inactive branches excluded. Vehicles and standalone characters now expose their supported configuration menus. Explicit multiple vehicle weapons retain their proper counts, and heavy vehicles retain their full published wounds.
-- Twelve transport capacity mappings; paid passengers can start aboard transports in Reserves. Eligible units can use Deep Strike. An explicit end-of-Movement **Reinforcements** step controls arrivals and Bloodletter Invocation.
+- Thirteen transport capacity mappings; paid passengers can start aboard transports in Reserves. Eligible units can use Deep Strike. An explicit end-of-Movement **Reinforcements** step controls arrivals and Bloodletter Invocation.
 - Arrival and disembarkation restrictions, Land Raider Assault Ramp, selected carrier benefits, emergency disembarkation, external Stormraven Dreadnought capacity, and immobile Deathstorm pods.
 - Shared targeting checks for the interface and engine, indirect shooting, Anti-keyword thresholds, One Shot tracking, Hazardous consequences, alternative weapon profiles, corrected charge distances, and additional source ability actions.
 - Valid saves with multiple offboard units now load correctly. Duplicate or unpurchased unit identities are rejected. Catalogue caching fits a standard browser quota and reports storage failures.

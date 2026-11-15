@@ -1,8 +1,8 @@
-# Alpha 0.10 — quality report
+# Alpha 0.10.1 — quality report
 
 This report covers software behavior and source import integrity. It does **not** certify full tabletop rules fidelity. No unit has been promoted to Verified.
 
-Release checks: **190 automated regression tests**, all six source audits, the complete catalogue execution checks below, and four Chromium browser test scripts. The CI workflow uses Node 24-compatible GitHub Actions; the engine regression job runs Node 22.
+Release checks: **194 automated regression tests**, all six source audits, the complete catalogue execution checks below, and four Chromium browser test scripts. The CI workflow uses Node 24-compatible GitHub Actions; the engine regression job runs Node 22.
 
 ## Source snapshot
 
@@ -24,7 +24,7 @@ The source catalogue repository is unchanged. CI records the checksums of the so
 | Unit discovery | All published playable root profiles; eight Silver Tempests estimates retained | 326 registered profiles; no duplicate IDs |
 | Infernal configuration | Active nested branches, optional None choices, formations, eligible Leaders, vehicle and character menus | 284 formation configurations and 2,991 reachable equipment choice attempts; audited quotas reject prohibited combinations |
 | Combat execution | Every imported profile evaluated in ranged and melee states | 652 profile/mode checks; finite results and wound bounds |
-| Transport plans | Twelve capacities, armour exclusions and multipliers, one external Stormraven Dreadnought | Combined cargo checks, illegal nested carriers rejected |
+| Transport plans | Thirteen capacities, armour exclusions and multipliers, one external Stormraven Dreadnought | Combined cargo checks, illegal nested carriers rejected |
 | Reserves | Paid units, Deep Strike, Reinforcements step, arriving carriers with passengers | Timing, distance, disembarkation, saved manifests and a complete automated battle |
 | Carrier effects | Land Raider Assault Ramp; selected Rhino, Razorback and Kharybdis benefits; emergency disembarkation | Movement, Advance, charge and wounds tests |
 | Combat corrections | Multiple vehicle weapons, full large-vehicle wounds, alternative firing profiles, shared targeting, corrected charge distance | Regression cases and source assertions |
@@ -38,6 +38,7 @@ The equipment count is **individual reachable choice attempts**, not every combi
 
 | Transport | Capacity | Eligibility and effects |
 | --- | ---: | --- |
+| Astartes Assault Drop Pod | 10 | Power armour; no Jump Packs; immobile after Deep Strike |
 | Rhino Carrier | 10 | No Terminators or Jump Packs |
 | Razorback Fire-support Carrier | 6 | No Terminators, Jump Packs or Gravis |
 | Land Raider | 12 | Terminators use two spaces; Assault Ramp |
@@ -76,4 +77,4 @@ Run the [README commands](../README.md), or open [Simulator Regression Tests](ht
 - `browser-qc.json`: browser version, tested flows, source download count and JavaScript errors.
 - Desktop/mobile screenshots and the exported test battle.
 
-Historical alpha notes remain available; this report and the current code describe release 0.10.
+Historical alpha notes remain available; this report and the current code describe release 0.10.1.

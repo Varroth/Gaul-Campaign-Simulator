@@ -23,3 +23,9 @@ test('cache decoder rejects recursive references and prototype keys',()=>{
  assert.throws(()=>C.unpackCache({packed:2,strings:[],objects:[[3,0]],payload:[3,0]}),/supported size/);
  assert.throws(()=>C.unpackCache({packed:2,strings:['__proto__'],objects:[],payload:[1,0,5]}),/Invalid cache key/);
 });
+test('cache upgrade frees obsolete catalogue storage without deleting saved battles',()=>{
+ const memory=new Map([['gaul-campaign-catalogue-cache-v11','obsolete'],['gaul-campaign-sim-v2','saved battle']]);
+ const storage={removeItem:k=>memory.delete(k),setItem:(k,v)=>{if(memory.has('gaul-campaign-catalogue-cache-v11'))throw Error('Quota exceeded');memory.set(k,v);}};
+ assert.equal(C.writeCache({v:C.CACHE_VERSION,cachedAt:Date.now(),catalogues:{}},storage),true);
+ assert.equal(memory.get('gaul-campaign-sim-v2'),'saved battle');assert.ok(memory.has(C.CACHE_KEY));
+});

@@ -30,6 +30,7 @@ url = f'http://127.0.0.1:{server.server_port}/'
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, executable_path=os.environ.get('BROWSER_EXECUTABLE') or shutil.which('chromium'), args=['--no-sandbox'])
     context = browser.new_context(viewport={'width': 1440, 'height': 1050}, reduced_motion='reduce')
+    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v11', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
     errors = []
     reads = []
     mode = {'offline': False}
@@ -60,9 +61,15 @@ with sync_playwright() as p:
     assert sorted(reads) == sorted(files), reads
     cache_bytes = page.evaluate('localStorage.getItem(GaulCatalogue.CACHE_KEY).length*2')
     assert cache_bytes < 5 * 1024 * 1024, cache_bytes
+    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v11')") is None
     for faction, count in [('IW', 96), ('FC', 169), ('AD', 61), ('ST', 8)]:
         page.locator('#faction-filter').select_option(faction)
         assert page.locator('[data-add]').count() == count, (faction, page.locator('#catalogue-count').inner_text())
+    for faction, name, models, points in [('FC', 'Company Captain', 1, 90), ('AD', 'Blackout Breachers', 5, 110)]:
+        page.locator('#faction-filter').select_option(faction)
+        page.locator('#unit-search').fill(name)
+        expect(page.locator('#unit-catalogue')).to_contain_text(f'{points} pts')
+        expect(page.locator('#unit-catalogue')).to_contain_text(f'{models} models')
     page.locator('#faction-filter').select_option('IW')
     while page.locator('[data-remove-side="player"]').count():
         page.locator('[data-remove-side="player"]').first.click()
@@ -156,6 +163,7 @@ with sync_playwright() as p:
     report = {'passed': True, 'browser': browser.version, 'imported': 326, 'cacheBytes': cache_bytes,
               'sourceDownloads': len(reads), 'javascriptErrors': errors,
               'checks': ['fresh XML sync and checksums', 'all faction lists', 'optional vehicle equipment',
+                         'legacy cache upgrade within browser quota', 'selected model costs and personnel branches',
                          'Deep Strike with two purchased passenger squads', 'reinforcement timing',
                          'arrival disembarkation', 'save/load and export/import', 'complete battle',
                          'reproducible ten-game Battle Lab', 'unchanged revision cache',

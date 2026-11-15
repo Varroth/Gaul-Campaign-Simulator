@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v11';
-const CACHE_VERSION=11;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v12';
+const CACHE_VERSION=12;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.10';
+const RULESET_VERSION='alpha-0.10.1';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -110,9 +110,10 @@ function formation(unit){
 // Compile the selected formation into a serializable choice tree. Optional groups
 // stay empty unless selected; nested menus are resolved only in the active branch.
 function resolveEquipment(tree,selections={}){
- const weapons=[],slots=[],picks={};let points=0;
+ const weapons=[],slots=[],picks={};let points=0,models=0;
  function walk(node){
   points+=node.points||0;
+  models+=node.models||0;
   weapons.push(...(node.weapons||[]).map(w=>({...w})));
   for(const fixed of node.fixed||[])walk(fixed);
   for(const group of node.groups||[]){
@@ -126,7 +127,7 @@ function resolveEquipment(tree,selections={}){
   }
  }
  walk(tree);
- return {weapons:mergeWeapons(weapons),slots,picks,points};
+ return {weapons:mergeWeapons(weapons),slots,picks,points,models};
 }
 function sourceWeapons(doc,unit,form,profileIndex,selections={}){
  const profiles=profileIndex||new Map(descendants(doc.documentElement,'profile').filter(p=>value(p,'id')&&value(p,'typeName')==='Weapon').map(p=>[value(p,'id'),p]));
@@ -157,7 +158,7 @@ function sourceWeapons(doc,unit,form,profileIndex,selections={}){
   const troopCount=label.match(/^(\d{1,2})\s+(?:(?:regular|standard|remaining)\s+)?(?:Thralls?|Reavers?|Warriors?|Marines?|troops?|servitors?|scouts?)\b/i);
   const squadCount=label.match(/^(\d{1,2})\s+(?:Hellblades|Hellfangs|Crude blades|Chainaxes)$/i);
   const copies=multiplier*Number(troopCount?.[1]||squadCount?.[1]||1);
-  const node={id:value(current,'id'),label,points:Number.isFinite(pointsFrom(current))?pointsFrom(current):0,weapons:directWeapons(current,copies),groups:[],fixed:[]};
+  const node={id:value(current,'id'),label,points:Number.isFinite(pointsFrom(current))?pointsFrom(current)*multiplier:0,models:value(current,'type')==='model'?copies:0,weapons:directWeapons(current,copies),groups:[],fixed:[]};
   for(const entry of path(current,'selectionEntries','selectionEntry'))if(minModels(entry)>0&&value(entry,'hidden')!=='true')node.fixed.push(build(entry,copies*minModels(entry),depth+1));
   for(const group of path(current,'selectionEntryGroups','selectionEntryGroup')){
    const name=value(group,'name');
@@ -167,7 +168,8 @@ function sourceWeapons(doc,unit,form,profileIndex,selections={}){
    }
    if(/enhancement|deployment|passenger|leader|requisition|vanguard|insertion|invoker|externally secured/i.test(name))continue;
    const options=path(group,'selectionEntries','selectionEntry').filter(e=>value(e,'hidden')!=='true');
-   if(!options.length||(!hasWeapons(group)&&!/flight configuration/i.test(name)))continue;
+   const hasModels=descendants(group,'selectionEntry').some(e=>value(e,'type')==='model');
+   if(!options.length||(!hasWeapons(group)&&!hasModels&&!/flight configuration/i.test(name)))continue;
    const max=path(group,'constraints','constraint').find(c=>value(c,'type')==='max'&&value(c,'field')==='selections');
    if(max&&int(value(max,'value'))>1){omitted.push(name+': multiple-selection equipment group');continue;}
    const id=value(group,'id')||'group-'+hash(name),defaultId=value(group,'defaultSelectionEntryId');
@@ -385,7 +387,7 @@ function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LE
 function reviewNotes(unit){
  if(!unit||unit.source!=='linked')return ['Built-in, simulator-only playtest profile; not imported from New Recruit.'];
  const a=unit.audit||{};
- const points=a.points==='formation'?'Starting points taken from the default required unit-size option (other sizes and extras may change the total).':a.points==='direct'?'Points read from the unit entry.':a.points==='per-model'?'Points extrapolated from a model entry; roster modifiers may change them.':'Points are a simulator estimate, not a published roster cost.';
+ const points=a.points==='formation'?'Starting points taken from the default required unit-size option (other sizes and extras may change the total).':a.points==='direct'?'Points read from the unit entry.':a.points==='selected-models'?'Points summed once from the selected models and their default equipment; conditional roster modifiers remain provisional.':a.points==='per-model'?'Points extrapolated from a model entry; roster modifiers may change them.':'Points are a simulator estimate, not a published roster cost.';
  return [points,
   a.unitStats==='source'?'Unit characteristics read from the linked profile; movement is converted to grid squares.':'Some characteristics use simulator defaults.',
   a.modelCount==='declared'?'Starting model count read from the source formation or explicit composition.':'Starting model count is a simulator approximation.',
@@ -437,13 +439,17 @@ function parseCatalogue(xml,faction,sourceVersion=''){
     return {id:c.id,label:c.label,models:c.models,points:c.points,loadout:one.weapons,
        slots:one.slots.filter(slot=>!!slot.id),equipmentTree:one.tree,equipmentPoints:one.points};
    }).filter(c=>Number.isInteger(c.models)&&c.models>=1&&c.models<=20).slice(0,22):[];
-  const cat=categoryFor(node),stats=getStats(node,name,cat),models=isLeader?1:countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
-  if(!p.estimated)p.points+=Math.max(0,linked.points-(pointsFrom(node)||0)-(form?.selected?.points||0));
+  const cat=categoryFor(node),stats=getStats(node,name,cat),models=isLeader?1:form?.selected?.models||linked.models||countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
+  // The resolved selection tree already includes mandatory per-model costs.
+  // Add only genuinely additional equipment to direct/formation base costs.
+  if(p.basis==='per-model'&&linked.points>0){p.points=linked.points;p.basis='selected-models';}
+  else if(!p.estimated)p.points+=Math.max(0,linked.points-(pointsFrom(node)||0)-(form?.selected?.points||0));
   if(faction==='IW'&&!configs.length)configs.push({id:'default',label:'Published formation',models,points:p.points-(pointsFrom(node)||0),loadout:linked.weapons,slots:linked.slots,equipmentTree:linked.tree,equipmentPoints:linked.points});
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
   const vehicle=isArmouredVehicle(name,cat),daemon=/Khorne Allies|\bDAEMON\b/i.test(cat)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell|pexi 270th|tenth company scouts/i.test(name+' '+cat);
   const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,painSensitive:true,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true,painSensitive:false}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
   if(daemon)special.daemon=true;
+  if(faction==='IW'&&daemon)special.alliedDaemon=/Khorne Allies/i.test(cat)||/^(Bloodletters|Bloodcrushers|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name);
   const profile=rootProfile(node);
   const fieldCoverage=['M','T','Sv','W','OC'].every(key=>!!field(profile,key));
   const sourceComposition=!!form?.selected?.models||!![...descendants(node,'description'),...descendants(node,'characteristic').filter(x=>value(x,'name')==='Description')].find(x=>/\bExactly\s+(ONE|TWO|THREE|FOUR|FIVE|\d+)\s+attack bikes\b|\b10\s+Daemons\s+with\b/i.test(x.textContent||''));
@@ -460,9 +466,9 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   unit.auditBlockers=[...unitAuditBlockers(node,form,profileIndex,unit.abilities),...linked.omitted];
   unit.keywords=path(node,'categoryLinks','categoryLink').map(c=>value(c,'name'));
   if(/Has Deep Strike|Deep Strike without/i.test(unit.abilities.map(a=>a.description).join(' ')))unit.special.deepStrike=true;
-  if(/Terminator|Jump|Raptor|Dreadclaw|Kharybdis|Deathstorm/i.test(name))unit.special.deepStrike=true;
+  if(/Terminator|Jump|Raptor|Dreadclaw|Kharybdis|Deathstorm|Astartes Assault Drop Pod/i.test(name))unit.special.deepStrike=true;
   if(/aircraft|gunship|interceptor|stormbird/i.test(name+' '+cat))unit.special.aircraft=true;
-  if(/Deathstorm/i.test(name))unit.special.immobile=true;
+  if(/Deathstorm|Astartes Assault Drop Pod/i.test(name))unit.special.immobile=true;
   unit.verification=statusFor(unit,sourceVersion);
   result.push(unit);
  }
@@ -538,7 +544,15 @@ function readCache(storage){
   return data;
  }catch(e){return null;}
 }
-function writeCache(data,storage){try{(storage||localStorage).setItem(CACHE_KEY,packCache(data));return true;}catch(e){return false;}}
+function writeCache(data,storage){
+ try{
+  const target=storage||localStorage,packed=packCache(data);
+  // Obsolete parser caches are unusable by this version and can otherwise
+  // consume the entire storage quota. Never remove saved battles or this key.
+  for(let version=1;version<CACHE_VERSION;version++)target.removeItem?.('gaul-campaign-catalogue-cache-v'+version);
+  target.setItem(CACHE_KEY,packed);return true;
+ }catch(e){return false;}
+}
 async function fetchJson(url,request){const resp=await request(url,{cache:'no-store',credentials:'omit'});if(!resp.ok)throw Error(`GitHub returned HTTP ${resp.status}`);return resp.json();}
 async function fetchText(url,request){const resp=await request(url,{cache:'no-store',credentials:'omit'});if(!resp.ok)throw Error(`Catalogue request returned HTTP ${resp.status}`);return resp.text();}
 async function readVersions(request){

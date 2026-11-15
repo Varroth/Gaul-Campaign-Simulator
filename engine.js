@@ -134,7 +134,7 @@ function total(muster){return muster.reduce((n,id)=>n+(BY_ID[id]?.points||0),0);
 function musterProblems(ids){
  const errors=[],count=new Map(),named=new Set();let lost=0;
  if(!Array.isArray(ids)||!ids.length||ids.length>14)return ['Musters must contain 1–14 units.'];
- const armyTotal=ids.reduce((sum,id)=>sum+(BY_ID[id]?.faction==='IW'?BY_ID[id].points:0),0),daemonTotal=ids.reduce((sum,id)=>sum+(BY_ID[id]?.faction==='IW'&&BY_ID[id]?.special?.daemon?BY_ID[id].points:0),0);
+ const armyTotal=ids.reduce((sum,id)=>sum+(BY_ID[id]?.faction==='IW'?BY_ID[id].points:0),0),daemonTotal=ids.reduce((sum,id)=>{const t=BY_ID[id];return sum+(t?.faction==='IW'&&(t.special?.alliedDaemon??(t.special?.daemon&&!isVehicle(t)))?t.points:0);},0);
  for(const id of ids){
   const t=BY_ID[id];if(!t){errors.push(`Unrecognized unit: ${id}`);continue;}
   const base=BY_ID[t.baseId]||t;
@@ -160,6 +160,7 @@ function musterProblems(ids){
 function transportSpec(t){
  if(!t||t.source!=='linked'||t.faction!=='IW')return null;
  const table={
+  'Astartes Assault Drop Pod':{capacity:10,terminators:false,powerArmour:true,landing:true},
   'Rhino Carrier':{capacity:10,terminators:false,powerArmour:true},
   'Razorback Fire-support Carrier':{capacity:6,terminators:false,powerArmour:true,noGravis:true},
   'Land Raider':{capacity:12,terminators:true,assaultRamp:true},
