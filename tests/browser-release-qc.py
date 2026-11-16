@@ -30,7 +30,7 @@ url = f'http://127.0.0.1:{server.server_port}/'
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, executable_path=os.environ.get('BROWSER_EXECUTABLE') or shutil.which('chromium'), args=['--no-sandbox'])
     context = browser.new_context(viewport={'width': 1440, 'height': 1050}, reduced_motion='reduce')
-    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v11', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
+    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v12', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
     errors = []
     reads = []
     mode = {'offline': False}
@@ -61,7 +61,7 @@ with sync_playwright() as p:
     assert sorted(reads) == sorted(files), reads
     cache_bytes = page.evaluate('localStorage.getItem(GaulCatalogue.CACHE_KEY).length*2')
     assert cache_bytes < 5 * 1024 * 1024, cache_bytes
-    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v11')") is None
+    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v12')") is None
     for faction, count in [('IW', 96), ('FC', 169), ('AD', 61), ('ST', 8)]:
         page.locator('#faction-filter').select_option(faction)
         assert page.locator('[data-add]').count() == count, (faction, page.locator('#catalogue-count').inner_text())

@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.10.1
+# Gaul Campaign Simulator — Alpha 0.10.2
 
 An unofficial tactical playtest for Gaul Campaign: Renegades.
 
@@ -12,9 +12,11 @@ The current source contains **326 imported profiles**: 96 Infernal Warriors (74 
 
 A source refresh does not change the profiles of a battle already underway. Saved linked battles pin source revisions and reject incompatible changed catalogues rather than silently changing the army.
 
-## Alpha 0.10.1 changes
+## Alpha 0.10.2 changes
 
-The final live-site pass also corrected per-model cost duplication, active personnel-branch counts, the allied-daemon cap for the army's own engines, the standard Assault Drop Pod, and cache migration from earlier versions.
+The quality pass corrected per-model cost duplication, active personnel-branch counts, the allied-daemon cap for the army's own engines, the standard Assault Drop Pod, and cache migration from earlier versions. Catalogue refreshes now remove obsolete fields while keeping active battles unchanged.
+
+Named-rule tests now cover Independent Forge, Boarding Priority, Forward Observer, Seal the Breach, Reactor Hunter, Thermic Line, Siege Charge, The Last Sentence, Dread Hunter, Void Deployment, and Siegebreaker. Directed Objective checks source OFFICER/VOXMASTER keywords, attached Leaders, visibility and Signal Grid range. These implementations retain Partial labels where grid geometry or timing is simplified. The ability audit and interface now use the same coverage manifest.
 
 - Nested Infernal Warriors equipment choices, including optional vehicle guns, with inactive branches excluded. Vehicles and standalone characters now expose their supported configuration menus. Explicit multiple vehicle weapons retain their proper counts, and heavy vehicles retain their full published wounds.
 - Thirteen transport capacity mappings; paid passengers can start aboard transports in Reserves. Eligible units can use Deep Strike. An explicit end-of-Movement **Reinforcements** step controls arrivals and Bloodletter Invocation.

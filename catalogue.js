@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v12';
-const CACHE_VERSION=12;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v13';
+const CACHE_VERSION=13;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.10.1';
+const RULESET_VERSION='alpha-0.10.2';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -226,13 +226,20 @@ const PARTIAL_ABILITY_NAMES=new Set(['Afflicted Ferocity','Ashen Chain','Relic P
 for(const name of ['Linked Fury','Outflank','Specialist Volley','Wrath Harness','Champion-Seeker','Linked Assault','Suppression Grid',
  'Custodian of Engines','Maintenance Crew','Serum Custodian','Neurological Stabilizers','Harbinger of Blood','Battlefield Dislocation',
  'Forge Liaison','Iron Column','The Voice Commands','Cohort Handler','Last Order','Skyborne Commander','Ashen Chain Commander',
- 'Assault Descent','Void Knife','Breach Veteran','Armoured Breakthrough','Falling Spear','Impact Assault','Shock Fright']){
+ 'Assault Descent','Void Knife','Breach Veteran','Armoured Breakthrough','Falling Spear','Impact Assault','Shock Fright',
+ 'Reaver Assault','Long March Doctrine','Line Held','Armour of Custody','Relic Pilot',
+ 'Independent Forge','Boarding Priority','Forward Observer','Seal the Breach','Reactor Hunter',
+ 'Thermic Line','Siege Charge','Indirect Battery','The Last Sentence','Dread Hunter','Void Deployment','Signal Grid','Siegebreaker',
+ 'Orbital Delivery','Disposable Battery','Assault Ramp','Breaching Assault','Fire-support Drop','Battle Taxi',
+ 'Subterranean Approach','Void-Grade Carrier','Legion Drop Carrier','Assault Lift']){
  ENGINE_ABILITY_NAMES.add(name);PARTIAL_ABILITY_NAMES.add(name);
 }
+// The UI, cache and command-line audit consume the same coverage manifest.
+const ABILITY_COVERAGE=Object.freeze(Object.fromEntries([...ENGINE_ABILITY_NAMES].map(name=>[name,PARTIAL_ABILITY_NAMES.has(name)?'partial':'modeled'])));
 function unitAbilities(unit){
  return path(unit,'profiles','profile').filter(p=>value(p,'typeName')==='Ability').map(p=>({
   name:value(p,'name'),description:field(p,'Description').slice(0,4000),
-  coverage:!ENGINE_ABILITY_NAMES.has(value(p,'name'))?'reference':PARTIAL_ABILITY_NAMES.has(value(p,'name'))?'partial':'modeled'
+  coverage:ABILITY_COVERAGE[value(p,'name')]||'reference'
  })).filter(p=>p.name&&p.description).slice(0,35);
 }
 function rootProfile(unit){
@@ -351,7 +358,7 @@ function configureUnit(base,config={},leaders=[]){
   selectedFormation:form.id,selectedGear:sortedGear,leaderId:leader?.id||null,
   formationLabel:form.label,bodyguardModels:form.models,models:form.models+((leader||base.special?.mandatoryChaplain&&base.leader)?1:0),
   points:Math.max(1,Math.round((base.rootPoints||0)+(Number.isFinite(form.points)?form.points:base.points)+extra+(leader?.points||0))),
-  loadout:mergeWeapons(weapons),leader:leader?{id:leader.id,name:leader.name,wp:leader.wp,ld:leader.ld,t:leader.t,save:leader.save,oc:leader.oc,points:leader.points,special:leader.special,abilities:leader.abilities||[]}:base.special?.mandatoryChaplain?base.leader:null,
+  loadout:mergeWeapons(weapons),leader:leader?{id:leader.id,name:leader.name,wp:leader.wp,ld:leader.ld,t:leader.t,save:leader.save,oc:leader.oc,points:leader.points,special:leader.special,keywords:leader.keywords||[],isLeader:true,abilities:leader.abilities||[]}:base.special?.mandatoryChaplain?base.leader:null,
   special:{...base.special},verification:'synced',visible:false,
   description:base.description+' · customized formation'+(leader?' with '+leader.name:'')};
  // Alternative formations may encode parent costs only: preserve published starting points.
@@ -604,5 +611,5 @@ async function sync({request=fetch,storage,force=false,onUpdate=()=>{},onStatus=
  const counts=Object.fromEntries(Object.entries(data.catalogues).map(([f,x])=>[f,x.units.length]));
  return {ok:failed===0,changed,failed,counts,versionSource,cached:!!cached};
 }
-return {REPOSITORY,FILES,CACHE_KEY,CACHE_VERSION,RULESET_VERSION,VERIFIED_LEDGER,formation,sourceWeapons,resolveEquipment,configureUnit,isValidLeaderFor,rosterMaximum,wargearLimits,enforceWargearLimits,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,packCache,unpackCache,verifySourceVersion,sync,readVersions};
+return {REPOSITORY,FILES,CACHE_KEY,CACHE_VERSION,RULESET_VERSION,VERIFIED_LEDGER,ABILITY_COVERAGE,formation,sourceWeapons,resolveEquipment,configureUnit,isValidLeaderFor,rosterMaximum,wargearLimits,enforceWargearLimits,fingerprint,statusFor,reviewNotes,parseCatalogue,collectUnitRoots,readCache,writeCache,packCache,unpackCache,verifySourceVersion,sync,readVersions};
 });

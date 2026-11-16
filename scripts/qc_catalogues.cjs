@@ -67,6 +67,12 @@ for(const unit of supported){
 }
 // Source assertions are intentionally concrete, separate from execution smoke tests.
 const iw=cache.catalogues.IW.units,byName=n=>iw.find(u=>u.name===n);
+check('source attached Rhazek retains OFFICER and can issue a legal command',()=>{
+ const leader=byName('Rhazek Thorne'),squad=byName('Infernal Legionaries');
+ const v=C.configureUnit(squad,{leaderId:leader.id},[leader]);E.registerConfiguration(v);
+ assert.ok(v.leader.keywords.includes('OFFICER'));
+ const g=E.createGame({player:[v.id],enemy:['ad-breach']});assert.equal(E.declareDirectedObjective(g,'player','e0').ok,true);
+});
 check('source optional Rhino pintle stays unequipped',()=>assert.equal(byName('Rhino Carrier').loadout.filter(w=>w.mode==='ranged').reduce((n,w)=>n+w.count,0),1));
 check('source Land Raider carries two twin lascannons',()=>assert.equal(byName('Land Raider').loadout.find(w=>w.name==='Twin lascannons').count,2));
 check('Pexi mortals receive no Infernal Serum',()=>{for(const u of iw.filter(u=>u.name.startsWith('Pexi 270th')))assert.equal(u.special.fnp,undefined);});

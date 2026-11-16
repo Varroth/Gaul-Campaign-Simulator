@@ -42,3 +42,10 @@ test('mortal wounds allocated to an attached hazardous Leader do not kill bodygu
  assert.equal(g.units[0].models,5);assert.equal(g.units[0].injury,0);
  assert.equal(g.units[0].hasSufferedDamage,true);
 });
+test('refresh removes obsolete optional profile fields while preserving the active battle',()=>{
+ const profile={...E.BY_ID['iw-despoilers'],source:'linked',sourceVersion:'old',id:'nr-iw-removed-fields',leader:{name:'Old Leader',wp:5,oc:1,special:{}},bodyguardModels:4};
+ E.registerLinked('IW',[profile]);const g=E.createGame({player:[profile.id],enemy:['ad-breach']});
+ const updated={...profile,sourceVersion:'new'};delete updated.leader;delete updated.bodyguardModels;
+ E.registerLinked('IW',[updated]);assert.equal(E.BY_ID[profile.id].leader,undefined);assert.equal(E.BY_ID[profile.id].bodyguardModels,undefined);
+ assert.equal(E.template(g.units[0]).leader.name,'Old Leader');
+});

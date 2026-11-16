@@ -1,8 +1,8 @@
-# Alpha 0.10.1 — quality report
+# Alpha 0.10.2 — quality report
 
 This report covers software behavior and source import integrity. It does **not** certify full tabletop rules fidelity. No unit has been promoted to Verified.
 
-Release checks: **194 automated regression tests**, all six source audits, the complete catalogue execution checks below, and four Chromium browser test scripts. The CI workflow uses Node 24-compatible GitHub Actions; the engine regression job runs Node 22.
+Release checks: **212 automated regression tests**, all six source audits, the complete catalogue execution checks below, and four Chromium browser test scripts. The CI workflow uses Node 24-compatible GitHub Actions; the engine regression job runs Node 22.
 
 ## Source snapshot
 
@@ -29,10 +29,13 @@ The source catalogue repository is unchanged. CI records the checksums of the so
 | Carrier effects | Land Raider Assault Ramp; selected Rhino, Razorback and Kharybdis benefits; emergency disembarkation | Movement, Advance, charge and wounds tests |
 | Combat corrections | Multiple vehicle weapons, full large-vehicle wounds, alternative firing profiles, shared targeting, corrected charge distance | Regression cases and source assertions |
 | Source abilities | Selected healing, stabilization, Battle-shock, support and reroll actions; active attached-Leader abilities | Timing, distance, target, use limits and persistence checks; incomplete contexts remain Partial |
+| Command and additional named rules | Source OFFICER/VOXMASTER eligibility, attached Leaders, visible targets or measured command range; eleven additional combat/support effects | 17 focused coverage, target, range, visibility, use-limit and Leader-death regressions |
 | Data and saves | Compressed cache, verified source checksums, offboard units, identity validation and battle profile snapshots | Cache roundtrip below 5 MiB; source revision rejection; saved battle validation |
 | Browser | Actual XML and unchanged application scripts in Chromium | Desktop/mobile, vehicle options, two squads arriving by Deep Strike, save/load, export/import, complete battle, seeded Battle Lab, offline cache |
 
 The equipment count is **individual reachable choice attempts**, not every combination of options. A successfully imported branch does not prove all its New Recruit conditions. Combat execution checks do not certify every named rule. Browser source responses use pinned XML for reproducibility; a deployed-site inspection separately checks hosting.
+
+The 0.10.2 pass also fixes stale optional fields surviving a catalogue refresh. A removed Leader or formation field is removed from newly built rosters, while an active battle keeps its pinned profile. The ability audit now reads the same manifest as the application, including abilities registered after the initial list; older audit counts incorrectly called those effects reference-only.
 
 ## Capacity mappings
 
@@ -73,8 +76,9 @@ The source is insufficient for the missing mission pack and undefined ranges. Th
 Run the [README commands](../README.md), or open [Simulator Regression Tests](https://github.com/Varroth/Gaul-Campaign-Simulator/actions/workflows/simulator-tests.yml). Each run uploads `simulator-quality-report` with:
 
 - `catalogue-qc.json`: imported units, formation/choice counts, source SHAs, cache size and failures.
+- `ability-coverage.json`: source descriptions and the application's actual coverage status for each named ability.
 - Individual Infernal unit/character audits with unresolved rules per source entry.
 - `browser-qc.json`: browser version, tested flows, source download count and JavaScript errors.
 - Desktop/mobile screenshots and the exported test battle.
 
-Historical alpha notes remain available; this report and the current code describe release 0.10.1.
+Historical alpha notes remain available; this report and the current code describe release 0.10.2.

@@ -65,7 +65,7 @@ function registerLinked(faction,units){
   const t={...source,visible:true};
   if(!Number.isInteger(t.points)||t.points<1||t.points>3000||!Number.isInteger(t.models)||t.models<1||t.models>21)continue;
   const existing=BY_ID[t.id];
-  if(existing){Object.assign(existing,t);}
+  if(existing){for(const key of Object.keys(existing))delete existing[key];Object.assign(existing,t);}
   else{TEMPLATES.push(t);BY_ID[t.id]=t;}
   count++;
  }
@@ -425,28 +425,37 @@ function lostCohortControl(g,u){
 }
 function declareDirectedObjective(g,side,targetId){
  if(g.finished||g.phase!=='movement'||g.active!==side)return {ok:false,message:'Declare a target during your Command/Movement phase.'};
+ if(g.directed?.[side])return {ok:false,message:'The Directed Objective is already declared for this turn.'};
  const target=living(g,side==='player'?'enemy':'player').find(u=>u.uid===targetId);
- const controllers=living(g,side).filter(u=>template(u).faction==='IW'&&(/Balan Bannon|Varroth|Captain|Warsmith|Officer|Chaplain/i.test(template(u).name)||template(u).special?.officer));
- if(!target||!controllers.length)return {ok:false,message:'A visible target and a friendly Infernal Warriors officer are required.'};
+ const controllers=living(g,side).filter(u=>template(u).faction==='IW'&&target&&(
+  unitHasKeyword(u,'OFFICER')&&hasLineOfSight(u,target)||unitHasKeyword(u,'VOXMASTER')&&distance(u,target)*2<=(unitHasAbility(u,'Signal Grid')?18:12)));
+ if(!target||!controllers.length)return {ok:false,message:'The target must be visible to an Infernal Warriors OFFICER or within 12 inches of a VOXMASTER (18 with Signal Grid).'};
  g.directed=g.directed||{player:null,enemy:null};g.directed[side]=target.uid;
  g.directedUsed=g.directedUsed||{player:false,enemy:false};g.directedUsed[side]=false;
  writeLog(g,`Directed Objective designated: ${template(target).name}.`);return {ok:true,targetId};
 }
-function isIWMarine(t){return t?.faction==='IW'&&!!t.special?.fnp&&!t.special?.daemon&&!/thrall|reaver|servitor/i.test(t.name);}
+function isIWMarine(t){return t?.faction==='IW'&&(t.keywords?.length?t.keywords.some(k=>k.toUpperCase()==='ASTARTES'):!!t.special?.fnp)&&!t.special?.daemon&&!isVehicle(t)&&!/thrall|reaver|servitor/i.test(t.name);}
+function unitHasKeyword(u,word){
+ const t=template(u),profiles=[t,...(t.leader&&u.leaderAlive!==false?[t.leader]:[])];
+ return profiles.some(p=>p.keywords?.length?p.keywords.some(k=>k.toUpperCase()===word):word==='OFFICER'&&(p.special?.officer||/Balan Bannon|Varroth|Captain|Warsmith|Officer/i.test(p.name||'')));
+}
 function hasAbility(t,name){return (t.abilities||[]).some(a=>a.name===name);}
 function unitHasAbility(u,name){return hasAbility(template(u),name)||(u.leaderAlive!==false&&hasAbility(template(u).leader||{},name));}
 function once(g,u,name,scope='turn'){
  const bag=u.abilityUses||(u.abilityUses={});
- const mark=scope==='battle'?'battle':scope==='round'?String(g.round):scope==='phase'?`${g.round}-${g.active}-${g.phase}`:`${g.round}-${g.active}`;
+ const mark=useMark(g,scope);
  if(bag[name]===mark)return false;
  bag[name]=mark;return true;
 }
+function useMark(g,scope='turn'){return scope==='battle'?'battle':scope==='round'?String(g.round):scope==='phase'?`${g.round}-${g.active}-${g.phase}`:`${g.round}-${g.active}`;}
+function availableUse(g,u,name,scope='turn'){return u.abilityUses?.[name]!==useMark(g,scope);}
 function hasActiveLeaderAbility(u,name){
  return u.leaderAlive!==false && hasAbility(template(u).leader||{},name);
 }
 function isVehicle(t){return /vehicle|dreadnought|tank|transport|siege armour|artillery|daemon engine|gunship|speeder|aircraft/i.test((t.category||'')+' '+t.name);}
 function isAircraft(t){if(typeof t.special?.aircraft==='boolean')return t.special.aircraft;return /aircraft|gunship|interceptor|stormbird|thunderhawk|stormraven/i.test((t.category||'')+' '+t.name);}
 const HIT_ABILITIES=[
+ ['Indirect Battery',(g,a,b,m)=>m==='ranged'&&hasLineOfSight(a,b),'turn'],
  ['Linked Fury',()=>true,'battle'],
  ['Outflank',(g,a,b,m)=>m==='ranged'&&a.arrivedTurn===g.round+'-'+g.active,'turn'],
  ['Specialist Volley',(g,a,b,m,w)=>m==='ranged'&&/plasma|melta|flamer|volkite|grav/i.test(w.name),'turn'],
@@ -499,12 +508,18 @@ function trySavingReroll(g,u,weapon,mode){
 }
 function shockTest(g,u){
  const t=template(u),target=Number.isFinite(t.ld)?t.ld:7;
- let roll=d6(g)+d6(g);
  const leaderName=t.leader&&u.leaderAlive!==false?t.leader.name:t.name;
- if(u.nextShockPass){u.nextShockPass=false;u.battleshocked=false;return {roll:12,passed:true};}
- const penalty=u.nextShockPenalty||0;roll-=penalty;u.nextShockPenalty=0;
+ if(u.nextShockPass){u.nextShockPass=false;u.nextShockPenalty=0;u.battleshocked=false;writeLog(g,t.name+' automatically passed its next Battle-shock test (The Last Sentence).');return {roll:null,passed:true};}
+ const penalty=u.nextShockPenalty||0;let roll=d6(g)+d6(g)-penalty;u.nextShockPenalty=0;
+ let rerolled=false;
  if(roll<target&&(((unitHasAbility(u,'Litany of Restraint')||unitHasAbility(u,'Oath Without End')||!t.leader?.abilities?.length&&/^(Infernal Chaplain|Orvath Krail)$/.test(leaderName)||unitHasAbility(u,'Line Held')&&g.objectives.some(o=>distance(u,o)<=1))&&!u.shockRerollUsed)||hasAbility(t,'Expeditionary Discipline')&&once(g,u,'shock:Expeditionary Discipline','battle'))){
-  u.shockRerollUsed=true;writeLog(g,`${leaderName} used its once-per-battle Battle-shock re-roll.`);roll=d6(g)+d6(g)-penalty;
+  u.shockRerollUsed=true;rerolled=true;writeLog(g,`${leaderName} used its once-per-battle Battle-shock re-roll.`);roll=d6(g)+d6(g)-penalty;
+ }
+ if(roll<target&&!rerolled){
+  const forge=isVehicle(t)&&t.special?.daemon&&living(g,u.side).find(v=>unitHasAbility(v,'Independent Forge')&&distance(v,u)*2<=6&&availableUse(g,v,'shock:Independent Forge'));
+  const boarding=transportSpec(t)&&living(g,u.side).find(v=>unitHasAbility(v,'Boarding Priority')&&distance(v,u)*2<=9&&availableUse(g,v,'shock:Boarding Priority','battle'));
+  const owner=forge||boarding,name=forge?'Independent Forge':'Boarding Priority';
+  if(owner&&once(g,owner,'shock:'+name,forge?'turn':'battle')){roll=d6(g)+d6(g)-penalty;writeLog(g,template(owner).name+' used '+name+' for '+t.name+'.');}
  }
  u.battleshocked=roll<target;
  writeLog(g,`${t.name} Battle-shock ${roll} vs ${target}+ — ${u.battleshocked?'FAILED (0 OC until Command phase)':'passed'}.`);
@@ -567,6 +582,14 @@ function autoAbilities(g,side){
  }
 }
 function auraHitReroll(g,a,b,mode){
+ if(mode==='ranged'&&template(a).faction==='IW'){
+  const observer=living(g,a.side).find(u=>unitHasAbility(u,'Forward Observer')&&distance(u,b)*2<=18&&hasLineOfSight(u,b)&&availableUse(g,u,'aura:Forward Observer','round'));
+  if(observer&&once(g,observer,'aura:Forward Observer','round')){writeLog(g,template(observer).name+' used Forward Observer.');return true;}
+ }
+ if(mode==='ranged'&&isAircraft(template(a))){
+  const commander=living(g,a.side).find(u=>unitHasAbility(u,'Void Deployment')&&availableUse(g,u,'Void Deployment','battle'));
+  if(commander&&once(g,commander,'Void Deployment','battle')){writeLog(g,template(commander).name+' used Void Deployment for one Aircraft Hit re-roll.');return true;}
+ }
  const rules=[
   ['Forge Liaison',9,mode==='ranged'&&/daemon engine/i.test(template(a).category||'')],
   ['Iron Column',9,mode==='ranged'&&isVehicle(template(a))],
@@ -672,6 +695,8 @@ function attack(g,attackerId,targetId,mode){
  if(!weapons.length)return {ok:false,message:'No legal attack: check phase, weapon range, line of sight, engagement and whether the unit has already attacked.'};
  const at=template(a),bt=template(b),dist=distance(a,b);
  if(mode==='ranged')a.shot=true;else a.fought=true;
+ if(unitHasAbility(a,'Dread Hunter')&&(bt.special?.psychic||targetKeyword(bt,'psyker'))&&once(g,a,'Dread Hunter','battle'))b.nextShockPenalty=(b.nextShockPenalty||0)+1;
+ const sealCover=mode==='ranged'&&hasActiveLeaderAbility(b,'Seal the Breach')&&/Void Breachers/i.test(bt.name)&&g.objectives.some(o=>distance(b,o)<=1)&&once(g,b,'cover:Seal the Breach','phase');
  let hits=0,wounds=0,unsaved=0,casualties=0,effective=0,attacks=0;
  g.bannonUsed=g.bannonUsed||{};g.bannonUsed[a.side]=g.bannonUsed[a.side]||{hit:false,wound:false};
  const directed=directedRerolls(g,a,b,mode),bannon=bannonRerolls(g,a,b);
@@ -686,13 +711,15 @@ function attack(g,attackerId,targetId,mode){
   const attempts=Math.min(6000-attacks,base+(bonus?tr.rapidFire*weapon.activeCount:0)+blast);
   if(attempts<=0)break;attacks+=attempts;
   const indirect=mode==='ranged'&&!hasLineOfSight(a,b);
-  const hitRoll=clamp(weapon.skill+clamp(((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+
+  const hitModifier=((mode==='ranged'&&bt.special.shroud&&dist>=4)?1:0)+
    ((mode==='ranged'&&at.special.psychic&&nullifierNear(g,b))?1:0)+
    (mode==='ranged'&&a.painSuppressedPhase!==g.round+'-'+g.active+'-'+g.phase?(a.painPenalty||0):0)-
-   (mode==='ranged'&&tr.heavy&&!a.moved?1:0)+(indirect?1:0),-1,1),2,6);
+   (mode==='ranged'&&tr.heavy&&!a.moved?1:0)+(indirect?1:0);
   // Lethal Hits and Sustained Hits are checked on an unmodified hit roll of 6.
   // Each successful hit is then resolved against the current surviving model.
   for(let i=0;i<attempts&&b.models>0;i++){
+   const hitRoll=clamp(weapon.skill+clamp(hitModifier+(!tr.torrent?(a.nextHitPenalty||0):0),-1,1),2,6);
+   if(!tr.torrent)a.nextHitPenalty=0;
    let roll=tr.torrent?6:d6(g);
    let hitRerolled=false;
    if(!tr.torrent&&roll<hitRoll&&(
@@ -705,9 +732,12 @@ function attack(g,attackerId,targetId,mode){
    if(!hitRerolled&&!tr.torrent&&roll<hitRoll){if(tryAbilityReroll(g,a,b,mode,weapon,'hit')||auraHitReroll(g,a,b,mode))roll=d6(g);}
    const critical=tr.torrent?false:roll===6;
    if(!tr.torrent&&(roll<hitRoll||indirect&&roll<4))continue;
+   if(isVehicle(bt)&&unitHasAbility(a,'Reactor Hunter')&&/neutron/i.test(weapon.name)&&once(g,a,'Reactor Hunter','battle'))b.nextHitPenalty=1;
    const repeat=critical?1+tr.sustainedHits:1;
    for(let extra=0;extra<repeat&&b.models>0;extra++){
     hits++;
+    const hasCover=mode==='ranged'&&(COVER.has(key(b.x,b.y))||indirect||sealCover);
+    const thermic=hasCover&&!tr.ignoresCover&&unitHasAbility(a,'Thermic Line')&&once(g,a,'Thermic Line','battle');
     const leaderUp=!!bt.leader&&b.leaderAlive!==false;
     const bodyguards=b.models-(leaderUp?1:0);
     const targetLeader=leaderUp&&(tr.precision||bodyguards===0);
@@ -725,12 +755,15 @@ function attack(g,attackerId,targetId,mode){
      wr=d6(g);woundRerolled=true;
     }
     if(!autoWound&&!woundRerolled&&wr<Math.min(woundTarget(weapon.s,bt.t),threshold)&&tryAbilityReroll(g,a,b,mode,weapon,'wound'))wr=d6(g);
-    if(!autoWound&&wr<Math.min(woundTarget(weapon.s,bt.t),threshold))continue;
+    let woundModifier=0;
+    if(!autoWound&&mode==='melee'&&wr>1&&wr<threshold&&wr===woundTarget(weapon.s,bt.t)-1&&COVER.has(key(b.x,b.y))&&unitHasAbility(a,'Siegebreaker')&&once(g,a,'Siegebreaker','phase')){woundModifier=1;writeLog(g,at.name+' used Siegebreaker on one melee Wound roll.');}
+    if(!autoWound&&wr+woundModifier<Math.min(woundTarget(weapon.s,bt.t),threshold))continue;
     wounds++;
     const bypass=tr.devastatingWounds&&!autoWound&&wr>=threshold;
     if(!bypass){
-     const coverBonus=mode==='ranged'&&!tr.ignoresCover&&(COVER.has(key(b.x,b.y))||indirect)?1:0;
-     const save=clamp(defenderProfile.save+weapon.ap-coverBonus,2,7);
+     const coverBonus=hasCover&&!tr.ignoresCover&&!thermic?1:0;
+     const siegeAP=unitHasAbility(a,'Siege Charge')&&targetKeyword(bt,'fortification')?1:0;
+     const save=clamp(defenderProfile.save+weapon.ap+siegeAP-coverBonus,2,7);
      if(save<=6){let saving=d6(g);if(saving<save&&trySavingReroll(g,b,weapon,mode))saving=d6(g);if(saving>=save)continue;}
     }
     unsaved++;
@@ -751,6 +784,7 @@ function attack(g,attackerId,targetId,mode){
       const veteran=bt.leader.name==='Varroth'&&!b.veteranSaveUsed;
       if(veteran){b.veteranSaveUsed=true;if(d6(g)>=5){b.leaderInjury=wp-1;writeLog(g,'Varroth survived a fatal blow (Veteran of Diesor II).');continue;}}
       b.leaderAlive=false;b.leaderInjury=0;b.models--;casualties++;
+      if(weapon.isLeader?hasActiveLeaderAbility(a,'The Last Sentence'):!at.leader&&hasAbility(at,'The Last Sentence'))a.nextShockPass=true;
       if(bt.special?.lost)writeLog(g,`${bt.name}: original Chaplain lost; Cohort will take Control Tests.`);
      }
     }else{
@@ -759,6 +793,7 @@ function attack(g,attackerId,targetId,mode){
       const veteran=bt.name==='Varroth'&&!b.veteranSaveUsed;
       if(veteran){b.veteranSaveUsed=true;if(d6(g)>=5){b.injury=wp-1;writeLog(g,'Varroth survived a fatal blow (Veteran of Diesor II).');continue;}}
       b.models--;b.injury=0;casualties++;if(b.models===0&&transportSpec(bt))emergencyDisembark(g,b);
+      if(b.models===0&&bt.isLeader&&(weapon.isLeader?hasActiveLeaderAbility(a,'The Last Sentence'):!at.leader&&hasAbility(at,'The Last Sentence')))a.nextShockPass=true;
      }
     }
    }
@@ -802,9 +837,14 @@ function charge(g,aid,bid){
    ['Armoured Breakthrough',a.disembarkedTurn===g.round+'-'+g.active],
    ['Blood-Earned Discipline',g.objectives.some(o=>distance(b,o)<=1)],
    ['Greater Daemon',true]
-  ].find(([n,eligible])=>eligible&&unitHasAbility(a,n));
-  if(!chargeRule&&a.transportChargeReroll){if(first<=second)first=d6(g);else second=d6(g);roll=first+second+(a.transportChargeBonus||0);a.transportChargeReroll=false;}
-  if(chargeRule&&once(g,a,'charge:'+chargeRule[0],['Blood-Earned Discipline','Blood-Bound Hunt','Skyborne Commander','Ashen Chain Commander','Assault Descent','Breach Veteran','Armoured Breakthrough'].includes(chargeRule[0])?'turn':'battle')){
+  ].find(([n,eligible])=>eligible&&unitHasAbility(a,n)&&availableUse(g,a,'charge:'+n,chargeScope(n)));
+  const commander=!chargeRule&&a.arrivedTurn===g.round+'-'+g.active&&living(g,a.side).find(u=>unitHasAbility(u,'Void Deployment')&&availableUse(g,u,'Void Deployment','battle'));
+  if(!chargeRule&&(a.transportChargeReroll||commander)){
+   if(first<=second)first=d6(g);else second=d6(g);roll=first+second+(a.transportChargeBonus||0);
+   if(a.transportChargeReroll)a.transportChargeReroll=false;
+   else{once(g,commander,'Void Deployment','battle');writeLog(g,template(commander).name+' used Void Deployment for one arrival Charge re-roll.');}
+  }
+  if(chargeRule&&once(g,a,'charge:'+chargeRule[0],chargeScope(chargeRule[0]))){
    if(chargeRule[0]==='Greater Daemon'){first=d6(g);second=d6(g);}else if(first<=second)first=d6(g);else second=d6(g);
    roll=first+second+(a.transportChargeBonus||0);writeLog(g,`${t.name}: ${chargeRule[0]} re-rolled ${chargeRule[0]==='Greater Daemon'?'both charge dice':'one charge die'}.`);
   }
@@ -820,6 +860,7 @@ function charge(g,aid,bid){
  }
  return {ok:true,success:true,roll};
 }
+function chargeScope(name){return ['Blood-Earned Discipline','Blood-Bound Hunt','Skyborne Commander','Ashen Chain Commander','Assault Descent','Breach Veteran','Armoured Breakthrough'].includes(name)?'turn':'battle';}
 function objectiveOwner(g,o){
  const tally={player:0,enemy:0};
  for(const u of living(g))if(distance(u,o)<=1){const t=template(u);
@@ -884,9 +925,9 @@ function aiTurn(g,side,options={}){
  const begin=resume?phases.indexOf(g.phase):0;
  if(!resume)startTurn(g,side);
  if(begin<=0&&!g.directed?.[side]){
-  const officer=living(g,side).find(u=>/Balan Bannon|Varroth|Captain|Chaplain/i.test(template(u).name)||/Balan Bannon|Varroth|Chaplain/i.test(template(u).leader?.name||''));
+  const officer=living(g,side).find(u=>unitHasKeyword(u,'OFFICER')||unitHasKeyword(u,'VOXMASTER'));
   if(officer){const enemies=living(g,side==='player'?'enemy':'player').sort((a,b)=>distance(officer,a)-distance(officer,b));
-   if(enemies.length)declareDirectedObjective(g,side,enemies[0].uid);}
+   for(const target of enemies)if(declareDirectedObjective(g,side,target.uid).ok)break;}
  }
  if(begin<=0){
   autoAbilities(g,side);
