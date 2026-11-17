@@ -30,7 +30,7 @@ url = f'http://127.0.0.1:{server.server_port}/'
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, executable_path=os.environ.get('BROWSER_EXECUTABLE') or shutil.which('chromium'), args=['--no-sandbox'])
     context = browser.new_context(viewport={'width': 1440, 'height': 1050}, reduced_motion='reduce')
-    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v12', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
+    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v13', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
     errors = []
     reads = []
     mode = {'offline': False}
@@ -61,7 +61,7 @@ with sync_playwright() as p:
     assert sorted(reads) == sorted(files), reads
     cache_bytes = page.evaluate('localStorage.getItem(GaulCatalogue.CACHE_KEY).length*2')
     assert cache_bytes < 5 * 1024 * 1024, cache_bytes
-    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v12')") is None
+    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v13')") is None
     for faction, count in [('IW', 96), ('FC', 169), ('AD', 61), ('ST', 8)]:
         page.locator('#faction-filter').select_option(faction)
         assert page.locator('[data-add]').count() == count, (faction, page.locator('#catalogue-count').inner_text())
@@ -79,6 +79,35 @@ with sync_playwright() as p:
         cards = page.locator('.unit-card').filter(has=page.locator('h4', has_text=name))
         cards.locator('[data-add]').first.click()
 
+    # Build a paid enhancement through actual UI, use CP, and restore its save.
+    page.locator('[data-detachment="Crimson Onslaught"]').check()
+    page.locator('#starting-cp').fill('3')
+    page.locator('#starting-cp').press('Tab')
+    add('Assault Jump Cadre')
+    page.locator('[data-edit-side="player"]').click()
+    page.locator('[data-config-kind="enhancement"]').select_option(label='Crimson Spur · 10 pts')
+    expect(page.locator('#muster-list')).to_contain_text('Crimson Spur')
+    page.screenshot(path=str(out / 'army-configuration.png'), full_page=True)
+    page.locator('#apply-musters').click()
+    page.locator('.cell[aria-label^="Friendly Assault Jump Cadre"]').first.click()
+    page.locator('[data-strat-name="Redline Advance"]').click()
+    expect(page.locator('#scoreboard')).to_contain_text('2 CP')
+    page.locator('[data-advance-unit]').click()
+    page.locator('#save-game').click()
+    army_save = page.evaluate('JSON.parse(localStorage.getItem("gaul-campaign-sim-v2"))')
+    assert army_save['game']['cp']['player'] == 2
+    assert army_save['game']['units'][0]['advanceBonus'] == 3
+    assert army_save['game']['settings']['armyRules']['player'] == ['Crimson Onslaught']
+    assert army_save['configurations'][0]['enhancementId']
+    page.locator('#load-game').click()
+    expect(page.locator('#battle-feedback')).to_have_text('Battle restored.')
+    expect(page.locator('#scoreboard')).to_contain_text('2 CP')
+    page.locator('[data-tab="builder"]').click()
+    expect(page.locator('#muster-list')).to_contain_text('Crimson Spur')
+    page.locator('[data-remove-side="player"]').click()
+    page.locator('[data-detachment="Crimson Onslaught"]').uncheck()
+    page.locator('#starting-cp').fill('0')
+    page.locator('#starting-cp').press('Tab')
     add('Rhino Carrier')
     page.locator('[data-edit-side="player"]').click()
     pintle = page.locator('select[data-config-slot]')
@@ -162,7 +191,7 @@ with sync_playwright() as p:
     assert not errors, errors
     report = {'passed': True, 'browser': browser.version, 'imported': 326, 'cacheBytes': cache_bytes,
               'sourceDownloads': len(reads), 'javascriptErrors': errors,
-              'checks': ['fresh XML sync and checksums', 'all faction lists', 'optional vehicle equipment',
+              'checks': ['fresh XML sync and checksums', 'all faction lists', 'paid upgrade and DP selection', 'CP stratagem and Advance bonuses', 'upgraded roster save/load', 'optional vehicle equipment',
                          'legacy cache upgrade within browser quota', 'selected model costs and personnel branches',
                          'Deep Strike with two purchased passenger squads', 'reinforcement timing',
                          'arrival disembarkation', 'save/load and export/import', 'complete battle',

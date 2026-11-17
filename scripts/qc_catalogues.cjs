@@ -86,6 +86,33 @@ check('own daemon engines do not consume the allied daemon allowance',()=>assert
 for(const [f,name,models,points] of [['FC','Company Captain',1,90],['FC','Frostbound Line Section',10,80],['AD','Blackout Breachers',5,110],['AD','Unmarked Scout Squad',10,140],['AD','Directorate Breach Cell',5,60],['AD','Shadow Operative Cell',5,65]])check(name+' selected models and points',()=>{
  const unit=cache.catalogues[f].units.find(u=>u.name===name);assert.equal(unit.models,models);assert.equal(unit.points,points);
 });
+report.enhancements={names:[],recipientChecks:0};
+const enhancementNames=new Set();
+for(const unit of iw)for(const enhancement of unit.enhancementOptions||[])check(unit.name+' paid '+enhancement.name,()=>{
+ const melee=unit.loadout.find(w=>w.mode==='melee');
+ const configured=C.configureUnit(unit,{enhancementId:enhancement.id,enhancementWeapon:melee?.sourceProfileId},iw.filter(u=>u.isLeader));
+ const baseline=C.configureUnit(unit,{},iw.filter(u=>u.isLeader));
+ assert.equal(configured.points,baseline.points+enhancement.points,'Upgrade must be paid exactly once');
+ assert.equal(configured.enhancement.name,enhancement.name);
+ assert.ok(Object.hasOwn(E.DETACHMENTS,enhancement.detachment));
+ E.registerConfiguration(configured);
+ assert.equal(E.musterProblems([configured.id],[enhancement.detachment],2000).filter(s=>/Enhancement|select .* first|paid copies/.test(s)).length,0);
+ if(enhancement.name==='Dismantler’s Charge'){
+  assert.equal(configured.loadout.filter(w=>w.designated).reduce((n,w)=>n+w.count,0),1);
+  assert.equal(configured.loadout.reduce((n,w)=>n+w.count,0),baseline.loadout.reduce((n,w)=>n+w.count,0));
+ }
+ enhancementNames.add(enhancement.name);report.enhancements.recipientChecks++;
+});
+report.enhancements.names=[...enhancementNames].sort();
+check('all sixteen source Enhancements have selectable paid recipients',()=>assert.equal(enhancementNames.size,16));
+check('named heroes cannot purchase Character Enhancements',()=>assert.equal(byName('Varroth').enhancementOptions.length,0));
+check('one attached generic Chaplain Enhancement is paid exactly once',()=>{
+ const squad=byName('Infernal Legionaries'),leader=byName('Infernal Chaplain'),enhancement=leader.enhancementOptions.find(e=>e.name==='Oath-Wrought Aegis');
+ const configured=C.configureUnit(squad,{leaderId:leader.id,leaderEnhancementId:enhancement.id},[leader]);
+ assert.equal(configured.points,C.configureUnit(squad,{leaderId:leader.id},[leader]).points+15);
+ assert.equal(configured.leader.enhancement.name,'Oath-Wrought Aegis');
+ assert.throws(()=>C.configureUnit(byName('Varroth'),{enhancementId:enhancement.id}),/cannot buy/);
+});
 const memory=new Map();
 check('offline cache within standard browser quota',()=>{
  const storage={setItem:(k,v)=>{report.cacheBytes=v.length*2;assert.ok(report.cacheBytes<5*1024*1024,'Cache exceeds 5 MiB');memory.set(k,v);},getItem:k=>memory.get(k)};
@@ -97,7 +124,7 @@ check('paid reserve transport manifest survives save and complete battle',()=>{
  const g=E.createGame({player:[carrier.id,squad.id,squad.id],enemy:['ad-breach','ad-shadow'],deployment:{player:['deepstrike','embark:0','embark:0'],enemy:['field','reserve']},seed:511});
  E.validateLoadedState(structuredClone(g));E.finishByAuto(g);assert.equal(g.finished,true);E.validateLoadedState(structuredClone(g));
 });
-report.summary={units:report.units.length,formations:report.units.reduce((n,u)=>n+u.formations,0),equipmentChoices:report.units.reduce((n,u)=>n+u.equipmentChoices,0),combatChecks:report.units.reduce((n,u)=>n+u.combatChecks,0),failures:report.failures.length};
+report.summary={units:report.units.length,formations:report.units.reduce((n,u)=>n+u.formations,0),equipmentChoices:report.units.reduce((n,u)=>n+u.equipmentChoices,0),combatChecks:report.units.reduce((n,u)=>n+u.combatChecks,0),enhancementRecipients:report.enhancements.recipientChecks,failures:report.failures.length};
 fs.writeFileSync(path.join(out,'catalogue-qc.json'),JSON.stringify(report,null,2));
 console.log(JSON.stringify({summary:report.summary,catalogues:report.catalogues,cacheBytes:report.cacheBytes,failures:report.failures.slice(0,20)},null,2));
 if(report.failures.length)process.exitCode=1;

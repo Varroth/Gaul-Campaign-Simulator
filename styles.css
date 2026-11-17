@@ -54,3 +54,5 @@
 .reserve-unit-buttons button:disabled{opacity:.45;cursor:not-allowed}
 .deployment-select{display:inline-flex;gap:4px;align-items:center;margin-left:8px;color:#b5c6cd;font-size:11px}
 .deployment-select select{font-size:11px;max-width:104px;padding:4px;background:#152129;color:#dce5e6}
+
+.army-rule-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:14px 0}.army-rule-choices label{display:flex;align-items:center;gap:8px;color:var(--text)}.army-rule-choices input{width:auto}#army-rules input[type=number]{width:100%;box-sizing:border-box}#army-rules{margin-bottom:16px}#army-rules summary{cursor:pointer}

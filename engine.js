@@ -131,13 +131,213 @@ function total(muster){return muster.reduce((n,id)=>n+(BY_ID[id]?.points||0),0);
 // the player selects different squad sizes or creates different gear variants.
 // Rules not represented here (detachment costs, allied quotas, roster-wide
 // enhancement conditions) must still be validated in New Recruit.
-function musterProblems(ids){
- const errors=[],count=new Map(),named=new Set();let lost=0;
+// Detachment Points and CP are separate resources. CP income is explicitly
+// configured for this training scenario because the source names no mission pack.
+const DETACHMENTS=Object.freeze({'Breach and Ruin':1,'Crimson Onslaught':1,'Iron Reavers':1,'War Hounds’ Legacy':2});
+function normalizeArmyRules(raw={},limit=2000){
+ const out={player:[],enemy:[]};
+ for(const side of ['player','enemy']){
+  const chosen=raw?.[side]||[];
+  if(!Array.isArray(chosen)||chosen.some(n=>!Object.hasOwn(DETACHMENTS,n))||new Set(chosen).size!==chosen.length)throw Error('Invalid detachment selection.');
+  if(chosen.length&&![1000,2000].includes(limit))throw Error('Source detachment budgets are defined only at 1,000 or 2,000 points.');
+  const budget=limit===1000?2:3;
+  if(chosen.reduce((sum,n)=>sum+DETACHMENTS[n],0)>budget)throw Error('Selected detachments exceed the '+budget+' DP budget.');
+  out[side]=[...chosen];
+ }
+ return out;
+}
+function normalizeCP(raw={}){
+ const out={initial:raw?.initial??0,perTurn:raw?.perTurn??0,reactions:raw?.reactions??false};
+ if(typeof out.reactions!=='boolean')throw Error('Defensive reaction setting must be true or false.');
+ if(!Number.isInteger(out.initial)||out.initial<0||out.initial>12||!Number.isInteger(out.perTurn)||out.perTurn<0||out.perTurn>3)throw Error('CP settings require 0–12 starting CP and 0–3 CP per own turn.');
+ return out;
+}
+function hasDetachment(g,side,name){return g.settings?.armyRules?.[side]?.includes(name)||false;}
+function hasUpgrade(u,name,{leaderOnly=false}={}){
+ const t=template(u);
+ return (!leaderOnly&&t.enhancement?.name===name&&(t.isLeader||!t.leader||u.models>(u.leaderAlive!==false?1:0)))||
+  (u.leaderAlive!==false&&t.leader?.enhancement?.name===name);
+}
+function unitUpgrade(u,name){const t=template(u);return t.enhancement?.name===name&&(!t.leader||u.models>(u.leaderAlive!==false?1:0));}
+function iwInfantry(u){return isIWMarine(template(u))&&targetKeyword(template(u),'infantry');}
+function iwAssault(u){return isIWMarine(template(u))&&(iwInfantry(u)||unitHasKeyword(u,'MOUNTED'));}
+function breachUnit(u){return /Void Breachers|Terminator|Siege Infantry/i.test(template(u).name+' '+template(u).category);}
+function onObjective(g,u){return g.objectives.some(o=>distance(u,o)<=1);}
+function isCovered(g,u){return COVER.has(key(u.x,u.y));}
+function effect(g,u,name){const x=u.stratagemEffects?.[name];return x&&x.phase===useMark(g,'phase')?x:null;}
+const STRATAGEMS=Object.freeze([
+ {name:'Machine-Ready',detachment:'Iron Reavers',phase:'movement',cost:1},
+ {name:'Redline Advance',detachment:'Crimson Onslaught',phase:'movement',cost:1},
+ {name:'Anvil and Fang',detachment:'Crimson Onslaught',phase:'fight',cost:1},
+ {name:'Shock Assault',detachment:'Crimson Onslaught',phase:'charge',cost:1},
+ {name:'By the Chain',detachment:'Crimson Onslaught',phase:'fight',cost:1},
+ {name:'Bulkhead Breakers',detachment:'Breach and Ruin',phase:'fight',cost:1},
+ {name:'Pressurised Entry',detachment:'Breach and Ruin',phase:'charge',cost:1},
+ {name:'Contain the Passage',detachment:'Breach and Ruin',phase:'reinforcements',cost:1},
+ {name:'Vox-Silent Assault',detachment:'Breach and Ruin',phase:'shooting',cost:1},
+ {name:'Emergency Field Repair',detachment:'Iron Reavers',phase:'reinforcements',cost:1},
+ {name:'Hammer the Breach',detachment:'Iron Reavers',phase:'shooting',cost:1},
+ {name:'Old Night Ammunition',detachment:'Iron Reavers',phase:'shooting',cost:2},
+ {name:'Unbroken Order',detachment:'War Hounds’ Legacy',phase:'movement',cost:1},
+ {name:'Crossing Fires',detachment:'War Hounds’ Legacy',phase:'shooting',cost:1},
+ {name:'Reserves in Step',detachment:'War Hounds’ Legacy',phase:'charge',cost:1},
+ {name:'Marked and Broken',detachment:'War Hounds’ Legacy',phase:'fight',cost:2}
+]);
+function stratagemOptions(g,uid){
+ const u=living(g,g.active).find(x=>x.uid===uid);
+ if(!u||g.finished||u.battleshocked||template(u).faction!=='IW')return [];
+ const t=template(u),stamp=useMark(g),enemies=living(g,u.side==='player'?'enemy':'player'),actions=[];
+ for(const rule of STRATAGEMS){
+  if(g.phase!==rule.phase||!hasDetachment(g,u.side,rule.detachment)||(g.cp?.[u.side]||0)<rule.cost||g.stratagemUses?.[u.side+':'+rule.name]===useMark(g,'phase'))continue;
+  let targets=[null];
+  const firing=rule.phase==='shooting',fighting=rule.phase==='fight';
+  if(firing&&u.shot||fighting&&u.fought)continue;
+  switch(rule.name){
+   case 'Machine-Ready': if(!isVehicle(t)||isAircraft(t)||u.moved||!(u.moveModifiers||[]).some(x=>x.turn===stamp&&x.kind==='characteristic'&&x.amount<0))continue;break;
+   case 'Redline Advance': if(!iwAssault(u)||u.moved||u.advancing)continue;break;
+   case 'Shock Assault': if(!iwAssault(u)||u.charged||u.advancing)continue;targets=enemies.filter(b=>canCharge(g,u.uid,b.uid));break;
+   case 'Pressurised Entry': if(!(t.name==='Void Breachers'||unitHasKeyword(u,'TERMINATOR'))||(u.arrivedTurn!==stamp&&u.disembarkedTurn!==stamp))continue;targets=enemies.filter(b=>canCharge(g,u.uid,b.uid));break;
+   case 'Reserves in Step': if(!iwInfantry(u)||u.arrivedTurn!==stamp)continue;targets=enemies.filter(b=>canCharge(g,u.uid,b.uid));break;
+   case 'Anvil and Fang': targets=enemies.filter(b=>canAttack(g,u.uid,b.uid,'melee')&&living(g,u.side).some(v=>v.uid!==u.uid&&distance(v,b)<=1));break;
+   case 'By the Chain': if(!/^Infernal (Berzerkers|Butchers)$/.test(t.name)||u.models-(t.leader&&u.leaderAlive!==false?1:0)<5)continue;break;
+   case 'Bulkhead Breakers': if(t.name!=='Void Breachers')continue;targets=enemies.filter(b=>onObjective(g,b)&&canAttack(g,u.uid,b.uid,'melee'));break;
+   case 'Contain the Passage': if(!breachUnit(u)&&!iwInfantry(u)||!onObjective(g,u))continue;break;
+   case 'Vox-Silent Assault': if(!(t.name==='Void Breachers'||unitHasKeyword(u,'TERMINATOR'))||(u.arrivedTurn!==stamp&&u.disembarkedTurn!==stamp))continue;targets=enemies.filter(b=>distance(u,b)*2<=12&&canAttack(g,u.uid,b.uid,'ranged'));break;
+   case 'Emergency Field Repair': if(!isVehicle(t)||!u.injury||u.fieldRepairUsed||!living(g,u.side).some(v=>(template(v).name==='Hadrak Voss'||template(v).leader?.name==='Hadrak Voss'&&v.leaderAlive!==false||template(v).name==='Forge Servitor Cohort')&&distance(u,v)*2<=3))continue;break;
+   case 'Hammer the Breach': if(!isVehicle(t))continue;targets=enemies.filter(b=>(isCovered(g,b)||targetKeyword(template(b),'fortification'))&&canAttack(g,u.uid,b.uid,'ranged'));break;
+   case 'Old Night Ammunition': if(!unitHasKeyword(u,'RELIC')||!unitHasKeyword(u,'TANK')||!isVehicle(t))continue;targets=enemies.filter(b=>(isVehicle(template(b))||targetKeyword(template(b),'monster'))&&canAttack(g,u.uid,b.uid,'ranged'));break;
+   case 'Unbroken Order': if(!u.painPenalty||t.special?.lost||living(g,u.side).some(v=>v.moved||v.advancing))continue;break;
+   case 'Crossing Fires': if(!isIWMarine(t))continue;targets=enemies.filter(b=>b.unsavedBy?.phase===useMark(g,'phase')&&b.unsavedBy.ids.some(id=>id!==u.uid&&isIWMarine(template(g.units.find(v=>v.uid===id))))&&hasLineOfSight(u,b)&&canAttack(g,u.uid,b.uid,'ranged'));break;
+   case 'Marked and Broken': targets=enemies.filter(b=>distance(u,b)<=1&&living(g,u.side).filter(v=>distance(v,b)<=1&&!v.fought).length>=2);break;
+  }
+  for(const target of targets){
+   const weaponOptions=rule.name==='Hammer the Breach'?eligibleAttackProfiles(g,u,target,'ranged'):rule.name==='Machine-Ready'?(u.moveModifiers||[]).filter(x=>x.turn===stamp&&x.kind==='characteristic'&&x.amount<0).map(x=>({sourceProfileId:x.id,name:'Ignore '+x.amount+' inches'})):[null];
+   for(const weapon of weaponOptions)actions.push({...rule,targetId:target?.uid||'',weaponId:weapon?.sourceProfileId||weapon?.name||'',label:rule.name+' · '+rule.cost+' CP'+(target?' → '+template(target).name:'')+(weapon?' · '+weapon.name:'')});
+  }
+ }
+ return actions;
+}
+function useStratagem(g,uid,name,targetId='',weaponId=''){
+ const action=stratagemOptions(g,uid).find(a=>a.name===name&&a.targetId===targetId&&a.weaponId===weaponId);
+ if(!action)return {ok:false,message:'Stratagem unavailable: check CP, detachment, phase, target and previous use.'};
+ const u=g.units.find(v=>v.uid===uid);
+ g.retargetWindow=null;g.cp[u.side]-=action.cost;g.stratagemUses=g.stratagemUses||{};g.stratagemUses[u.side+':'+name]=useMark(g,'phase');
+ u.stratagemEffects=u.stratagemEffects||{};u.stratagemEffects[name]={phase:useMark(g,'phase'),targetId,weaponId,remaining:name==='By the Chain'?Math.floor((u.models-(template(u).leader&&u.leaderAlive!==false?1:0))/5):1};
+ if(name==='Emergency Field Repair'){u.injury--;u.fieldRepairUsed=true;}
+ if(name==='Unbroken Order')u.painPenalty=0;u.advanceRerolled=false;u.advanceBonus=0;
+ if(name==='Contain the Passage')u.extraOCTurn=useMark(g);
+ if(name==='Marked and Broken'){
+  const target=g.units.find(v=>v.uid===targetId),other=living(g,u.side).find(v=>v.uid!==u.uid&&!v.fought&&distance(v,target)<=1);
+  other.stratagemEffects=other.stratagemEffects||{};other.stratagemEffects[name]={phase:useMark(g,'phase'),targetId,remaining:1};
+ }
+ writeLog(g,template(u).name+' used '+name+' ('+action.cost+' CP; '+g.cp[u.side]+' remaining).');return {ok:true};
+}
+const REACTIONS=Object.freeze({
+ 'Shield Wall':{detachment:'Breach and Ruin',cost:1},
+ 'Cataphractii Resolve':{detachment:'Breach and Ruin',cost:2},
+ 'Pain as Purpose':{detachment:'Crimson Onslaught',cost:1},
+ 'Armoured Curtain':{detachment:'Iron Reavers',cost:1},
+ 'Containment Protocol':{detachment:'Iron Reavers',cost:1},
+ 'The Old Oath':{detachment:'War Hounds’ Legacy',cost:1},
+ 'Brotherhood of Iron':{detachment:'War Hounds’ Legacy',cost:1}
+});
+// Reactions are opt-in scenario orders. They are paid at the actual trigger,
+// so an unused defensive order cannot consume CP before the enemy acts.
+function spendReaction(g,u,name){
+ const r=REACTIONS[name];
+ if(!r||!g.settings?.cpRules?.reactions||!u.models||u.battleshocked||u.deployment&&u.deployment!=='field'||template(u).faction!=='IW'||!hasDetachment(g,u.side,r.detachment)||(g.cp?.[u.side]||0)<r.cost||g.stratagemUses?.[u.side+':'+name]===useMark(g,'phase'))return false;
+ g.cp[u.side]-=r.cost;g.stratagemUses=g.stratagemUses||{};g.stratagemUses[u.side+':'+name]=useMark(g,'phase');
+ writeLog(g,template(u).name+' reacted with '+name+' ('+r.cost+' CP; '+g.cp[u.side]+' remaining).');return true;
+}
+function defensiveCover(g,u,attacker,weapons){
+ if(g.phase!=='shooting'||u.side===g.active||isCovered(g,u)||weapons.every(w=>weaponTraits(w).ignoresCover))return false;
+ if(template(u).name==='Void Breachers'&&!u.moved&&spendReaction(g,u,'Shield Wall'))return true;
+ if(!iwInfantry(u))return false;
+ const carriers=living(g,u.side).filter(v=>isVehicle(template(v))&&!isAircraft(template(v)));
+ if(carriers.some(v=>distance(v,u)*2<=3)&&spendReaction(g,u,'Armoured Curtain'))return true;
+ return carriers.some(v=>distance(v,u)*2<=6)&&spendReaction(g,u,'Brotherhood of Iron');
+}
+function casualtyReaction(g,u){
+ if(template(u).special?.fnp&&isIWMarine(template(u))&&spendReaction(g,u,'Pain as Purpose'))u.painPurposeTurn=useMark(g);
+}
+function movementAllowance(g,u){
+ const mods=(u.moveModifiers||[]).filter(x=>x.kind==='characteristic'&&x.turn===useMark(g));
+ const skip=effect(g,u,'Machine-Ready')?.weaponId;
+ const inches=mods.reduce((sum,m)=>sum+(m.id===skip?0:m.amount),0);
+ return Math.max(0,Math.floor((template(u).move*2+inches)/2));
+}
+
+function coordinatedOptions(g,uid){
+ const a=living(g,g.active).find(u=>u.uid===uid);if(!a||g.finished||a.battleshocked||!['shooting','fight'].includes(g.phase))return [];
+ const mode=g.phase==='shooting'?'ranged':'melee',allies=living(g,g.active),enemies=living(g,g.active==='player'?'enemy':'player');
+ // Both attacks are declared together at phase start, before either resolves.
+ if(allies.some(u=>mode==='ranged'?u.shot:u.fought))return [];
+ const result=[];
+ for(const b of allies){if(b.uid===a.uid||b.battleshocked)continue;
+  const network=hasDetachment(g,a.side,'War Hounds’ Legacy')&&isIWMarine(template(a))&&isIWMarine(template(b))&&g.doctrineUses?.[a.side+':network']!==useMark(g)&&allies.some(c=>(unitHasKeyword(c,'OFFICER')||unitHasKeyword(c,'VOXMASTER'))&&distance(c,a)*2<=12+(unitUpgrade(c,'Vox of the Unforgotten')?3:0)&&distance(c,b)*2<=12+(unitUpgrade(c,'Vox of the Unforgotten')?3:0));
+  const column=g.phase==='shooting'&&hasDetachment(g,a.side,'Iron Reavers')&&g.doctrineUses?.[a.side+':column']!==useMark(g,'phase')&&isVehicle(template(a))&&targetKeyword(template(b),'infantry')&&template(b).faction==='IW'&&distance(a,b)*2<=9;
+  if(!network&&!column)continue;
+  for(const target of enemies){if(!canAttack(g,a.uid,target.uid,mode)||!canAttack(g,b.uid,target.uid,mode))continue;
+   if(network)for(const first of ['hit','wound'])for(const second of ['hit','wound'])result.push({kind:'network',partnerId:b.uid,targetId:target.uid,choice:first+':'+second,label:'Legion Battle Network · '+template(b).name+' → '+template(target).name+' ('+first+' / '+second+')'});
+   if(column)for(const recipient of [a,b])result.push({kind:'column',partnerId:b.uid,targetId:target.uid,choice:recipient.uid,label:'Iron and Ash · '+template(b).name+' → '+template(target).name+' (Hit re-roll: '+template(recipient).name+')'});
+  }
+ }
+ return result;
+}
+function coordinatedAttack(g,uid,kind,partnerId,targetId,choice){
+ if(!coordinatedOptions(g,uid).some(x=>x.kind===kind&&x.partnerId===partnerId&&x.targetId===targetId&&x.choice===choice))return {ok:false,message:'Coordinated attack unavailable: declare at phase start with both units, shared target and command range legal.'};
+ const a=g.units.find(u=>u.uid===uid),b=g.units.find(u=>u.uid===partnerId),mode=g.phase==='shooting'?'ranged':'melee';
+ g.doctrineUses=g.doctrineUses||{};g.doctrineUses[a.side+':'+kind]=useMark(g,kind==='network'?'turn':'phase');
+ if(kind==='network')for(const [i,u] of [a,b].entries())u.pairReroll={phase:useMark(g,'phase'),targetId,kind:choice.split(':')[i],remaining:1};
+ else{const recipient=g.units.find(u=>u.uid===choice);recipient.pairReroll={phase:useMark(g,'phase'),targetId,kind:'hit',remaining:1};}
+ writeLog(g,(kind==='network'?'Legion Battle Network':'Iron and Ash')+': '+template(a).name+' and '+template(b).name+' jointly declared attacks on '+template(g.units.find(u=>u.uid===targetId)).name+'.');
+ const first=attack(g,uid,targetId,mode),second=canAttack(g,partnerId,targetId,mode)?attack(g,partnerId,targetId,mode):null;
+ if(!second){if(mode==='ranged')b.shot=true;else b.fought=true;}
+ return {ok:true,first,second};
+}
+function autoCoordinate(g,side){
+ for(const u of living(g,side)){const option=coordinatedOptions(g,u.uid)[0];if(option){coordinatedAttack(g,u.uid,option.kind,option.partnerId,option.targetId,option.choice);break;}}
+}
+
+function retargetOptions(g){
+ if(g.finished||g.retargetWindow?.side!==g.active||g.retargetWindow?.phase!==useMark(g,'phase'))return [];
+ const owners=living(g,g.active).filter(u=>unitUpgrade(u,'War Hounds’ Field Manual')&&availableUse(g,u,'War Hounds’ Field Manual','battle'));
+ return owners.flatMap(u=>living(g,g.active==='player'?'enemy':'player').filter(b=>distance(u,b)*2<=12||living(g,g.active).some(v=>unitHasKeyword(v,'OFFICER')&&hasLineOfSight(v,b))).map(b=>({ownerId:u.uid,targetId:b.uid,label:'Field Manual: '+template(b).name})));
+}
+function retargetDirected(g,uid,targetId){
+ if(!retargetOptions(g).some(x=>x.ownerId===uid&&x.targetId===targetId))return {ok:false,message:'No immediate Field Manual retarget is available.'};
+ const u=g.units.find(x=>x.uid===uid);once(g,u,'War Hounds’ Field Manual','battle');g.directed[g.active]=targetId;g.retargetWindow=null;
+ writeLog(g,template(u).name+' used War Hounds’ Field Manual to retarget '+template(g.units.find(x=>x.uid===targetId)).name+'.');return {ok:true};
+}
+function autoRetarget(g,side){const x=retargetOptions(g)[0];if(x)retargetDirected(g,x.ownerId,x.targetId);}
+function autoStratagem(g,u,target=null){
+ const actions=stratagemOptions(g,u.uid).filter(a=>!a.targetId||a.targetId===target?.uid);
+ const action=actions[0];if(action)useStratagem(g,u.uid,action.name,action.targetId,action.weaponId);
+}
+function stratagemReroll(g,a,b,mode,kind){
+ const rules=kind==='hit'?['Vox-Silent Assault']:['By the Chain','Old Night Ammunition','Marked and Broken'];
+ for(const name of rules){const x=effect(g,a,name);if(x&&x.remaining>0&&(!x.targetId||x.targetId===b.uid)){x.remaining--;return true;}}
+ return false;
+}
+function rerollAdvance(g,uid){
+ const u=living(g,g.active).find(v=>v.uid===uid);
+ if(g.finished||g.phase!=='movement'||!u||!iwInfantry(u)||!u.advancing||u.moved||u.advanceRerolled||u.arrivedTurn===useMark(g)||g.voxAdvance?.[u.side]===g.round)return {ok:false,message:'Vox-Directed Advance unavailable.'};
+ g.voxAdvance=g.voxAdvance||{};g.voxAdvance[u.side]=g.round;u.advanceRerolled=true;
+ u.advanceRoll=d6(g)+(u.advanceBonus||0);writeLog(g,template(u).name+' used Vox-Directed Advance: '+u.advanceRoll+' inches.');return {ok:true,roll:u.advanceRoll};
+}
+
+function musterProblems(ids,detachments=[],pointsLimit=null){
+ const errors=[],count=new Map(),named=new Set(),enhancements=new Map();let lost=0;
  if(!Array.isArray(ids)||!ids.length||ids.length>14)return ['Musters must contain 1–14 units.'];
  const armyTotal=ids.reduce((sum,id)=>sum+(BY_ID[id]?.faction==='IW'?BY_ID[id].points:0),0),daemonTotal=ids.reduce((sum,id)=>{const t=BY_ID[id];return sum+(t?.faction==='IW'&&(t.special?.alliedDaemon??(t.special?.daemon&&!isVehicle(t)))?t.points:0);},0);
  for(const id of ids){
   const t=BY_ID[id];if(!t){errors.push(`Unrecognized unit: ${id}`);continue;}
   const base=BY_ID[t.baseId]||t;
+  for(const e of [t.enhancement,t.leader?.enhancement].filter(Boolean)){
+   if(!detachments.includes(e.detachment))errors.push(e.name+': select '+e.detachment+' first.');
+   const copies=(enhancements.get(e.id)||0)+1;enhancements.set(e.id,copies);
+   if(copies>e.maxCopies)errors.push(e.name+': maximum '+e.maxCopies+' paid copies per army.');
+  }
   const key=base.sourceId||base.id,used=(count.get(key)||0)+1;count.set(key,used);
   if(Number.isInteger(base.rosterMax)&&used>base.rosterMax)errors.push(`${base.name}: New Recruit allows at most ${base.rosterMax} per army.`);
   if(base.faction==='IW'&&base.special?.lost&&++lost>2)errors.push('Lost Cohort: maximum two squads combined, regardless of armour type.');
@@ -150,7 +350,8 @@ function musterProblems(ids){
    named.add(leader.id);
   }
  }
- if(daemonTotal>armyTotal*.25+1e-6)errors.push(`Khorne daemon allies exceed the 25% army points limit (${daemonTotal} / ${armyTotal} pts).`);
+ if(enhancements.size>(pointsLimit===1000?2:4))errors.push('Too many distinct Enhancements for this battle size.');
+ if(daemonTotal>(pointsLimit||armyTotal)*.25+1e-6)errors.push(`Khorne daemon allies exceed the 25% army points limit (${daemonTotal} / ${armyTotal} pts).`);
  return [...new Set(errors)];
 }
 
@@ -260,11 +461,13 @@ function invokeBloodletters(g,thrallsUid,bloodlettersUid,x,y){
 }
 function createGame(options={}){
  const pm=Array.isArray(options.player)?options.player:DEFAULT_PLAYER, em=Array.isArray(options.enemy)?options.enemy:DEFAULT_ENEMY;
- const invalid=[...musterProblems(pm),...musterProblems(em)];
+ const pointsLimit=options.pointsLimit??null,armyRules=normalizeArmyRules(options.armyRules,pointsLimit||2000),cpRules=normalizeCP(options.cpRules);
+ const invalid=[...musterProblems(pm,armyRules.player,pointsLimit),...musterProblems(em,armyRules.enemy,pointsLimit)];
+ if(pointsLimit&&(![500,1000,2000,3000].includes(pointsLimit)||total(pm)>pointsLimit||total(em)>pointsLimit))throw Error('Muster exceeds the selected points limit.');
  if(invalid.length)throw Error('Illegal muster: '+invalid[0]);
  const planned=normalizeDeployment(options.deployment,{player:pm,enemy:em});
  const seed=Number.isFinite(+options.seed)?(+options.seed>>>0):7126;
- const game={version:2,seed,seedState:seed||1,round:1,phase:'movement',active:'player',finished:false,winner:null,score:{player:0,enemy:0},units:[],log:[],objectives:OBJECTIVES.map(o=>({...o})),directed:{player:null,enemy:null},directedUsed:{player:false,enemy:false},invocationUsed:{player:false,enemy:false},settings:{player:[...pm],enemy:[...em],deployment:planned}};
+ const game={version:2,seed,seedState:seed||1,round:1,phase:'movement',active:'player',finished:false,winner:null,score:{player:0,enemy:0},units:[],log:[],objectives:OBJECTIVES.map(o=>({...o})),directed:{player:null,enemy:null},directedUsed:{player:false,enemy:false},invocationUsed:{player:false,enemy:false},cp:{player:cpRules.initial,enemy:cpRules.initial},settings:{player:[...pm],enemy:[...em],deployment:planned,armyRules,cpRules,pointsLimit}};
  const used=new Set();
  function place(list,side){
   list.forEach((id,i)=>{
@@ -338,6 +541,7 @@ function applyMortalWounds(g,u,amount,{leaderOnly=false}={}){
   }
  }
  if(!u.models&&transportSpec(t))emergencyDisembark(g,u);
+ if(casualties)casualtyReaction(g,u);
  return {damage,casualties};
 }
 function emergencyDisembark(g,carrier){
@@ -366,6 +570,7 @@ function status(u){const t=template(u);
 function writeLog(g,text){g.log.unshift(`R${g.round} · ${text}`);if(g.log.length>250)g.log.length=250;}
 function startTurn(g,side){
  g.active=side;g.phase='movement';
+ if(g.cp&&g.settings.cpRules)g.cp[side]+=g.settings.cpRules.perTurn;
  g.directed=g.directed||{player:null,enemy:null};g.directed[side]=null;
  g.directedUsed=g.directedUsed||{player:false,enemy:false};g.directedUsed[side]=false;
  g.bannonUsed=g.bannonUsed||{player:{hit:false,wound:false},enemy:{hit:false,wound:false}};g.bannonUsed[side]={hit:false,wound:false};g.bannonRecipient=g.bannonRecipient||{};g.bannonRecipient[side]=null;
@@ -428,7 +633,7 @@ function declareDirectedObjective(g,side,targetId){
  if(g.directed?.[side])return {ok:false,message:'The Directed Objective is already declared for this turn.'};
  const target=living(g,side==='player'?'enemy':'player').find(u=>u.uid===targetId);
  const controllers=living(g,side).filter(u=>template(u).faction==='IW'&&target&&(
-  unitHasKeyword(u,'OFFICER')&&hasLineOfSight(u,target)||unitHasKeyword(u,'VOXMASTER')&&distance(u,target)*2<=(unitHasAbility(u,'Signal Grid')?18:12)));
+  unitHasKeyword(u,'OFFICER')&&hasLineOfSight(u,target)||unitHasKeyword(u,'VOXMASTER')&&distance(u,target)*2<=((unitHasAbility(u,'Signal Grid')?18:12)+(unitUpgrade(u,'Vox of the Unforgotten')?3:0))));
  if(!target||!controllers.length)return {ok:false,message:'The target must be visible to an Infernal Warriors OFFICER or within 12 inches of a VOXMASTER (18 with Signal Grid).'};
  g.directed=g.directed||{player:null,enemy:null};g.directed[side]=target.uid;
  g.directedUsed=g.directedUsed||{player:false,enemy:false};g.directedUsed[side]=false;
@@ -436,6 +641,7 @@ function declareDirectedObjective(g,side,targetId){
 }
 function isIWMarine(t){return t?.faction==='IW'&&(t.keywords?.length?t.keywords.some(k=>k.toUpperCase()==='ASTARTES'):!!t.special?.fnp)&&!t.special?.daemon&&!isVehicle(t)&&!/thrall|reaver|servitor/i.test(t.name);}
 function unitHasKeyword(u,word){
+ if(word==='VOXMASTER'&&unitUpgrade(u,'Vox of the Unforgotten'))return true;
  const t=template(u),profiles=[t,...(t.leader&&u.leaderAlive!==false?[t.leader]:[])];
  return profiles.some(p=>p.keywords?.length?p.keywords.some(k=>k.toUpperCase()===word):word==='OFFICER'&&(p.special?.officer||/Balan Bannon|Varroth|Captain|Warsmith|Officer/i.test(p.name||'')));
 }
@@ -452,8 +658,8 @@ function availableUse(g,u,name,scope='turn'){return u.abilityUses?.[name]!==useM
 function hasActiveLeaderAbility(u,name){
  return u.leaderAlive!==false && hasAbility(template(u).leader||{},name);
 }
-function isVehicle(t){return /vehicle|dreadnought|tank|transport|siege armour|artillery|daemon engine|gunship|speeder|aircraft/i.test((t.category||'')+' '+t.name);}
-function isAircraft(t){if(typeof t.special?.aircraft==='boolean')return t.special.aircraft;return /aircraft|gunship|interceptor|stormbird|thunderhawk|stormraven/i.test((t.category||'')+' '+t.name);}
+function isVehicle(t){return (t?.keywords||[]).some(k=>['VEHICLE','TANK','DAEMON ENGINE','AIRCRAFT'].includes(k.toUpperCase()))||/vehicle|dreadnought|tank|transport|siege armour|artillery|daemon engine|gunship|speeder|aircraft/i.test((t.category||'')+' '+t.name);}
+function isAircraft(t){if(typeof t.special?.aircraft==='boolean')return t.special.aircraft;return (t.keywords||[]).some(k=>k.toUpperCase()==='AIRCRAFT')||/aircraft|gunship|interceptor|stormbird|thunderhawk|stormraven/i.test((t.category||'')+' '+t.name);}
 const HIT_ABILITIES=[
  ['Indirect Battery',(g,a,b,m)=>m==='ranged'&&hasLineOfSight(a,b),'turn'],
  ['Linked Fury',()=>true,'battle'],
@@ -492,6 +698,18 @@ const WOUND_ABILITIES=[
 function EQUAL(value,...allowed){return allowed.includes(value);}
 function tryAbilityReroll(g,a,b,mode,weapon,kind){
  const t=template(a),candidates=kind==='hit'?HIT_ABILITIES:WOUND_ABILITIES;
+ if(a.pairReroll?.phase===useMark(g,'phase')&&a.pairReroll.targetId===b.uid&&a.pairReroll.kind===kind&&a.pairReroll.remaining>0){a.pairReroll.remaining--;return true;}
+ if(stratagemReroll(g,a,b,mode,kind))return true;
+ const bonus=kind==='hit'?[
+  ['Ash-Forged Targeter',mode==='ranged'],
+  ['detachment:Controlled Fury',mode==='melee'&&a.controlledFuryTurn===useMark(g)]
+ ]:[['Siege Ledger',mode==='ranged'&&(isCovered(g,b)||!hasLineOfSight(a,b))],['Sunderer of Gates',targetKeyword(template(b),'fortification')],['detachment:No Door Holds',mode==='melee'&&a.chargeSuccess&&a.chargedTarget===b.uid&&(onObjective(g,b)||isCovered(g,b))&&breachUnit(a)&&hasDetachment(g,a.side,'Breach and Ruin')]];
+ for(const [name,eligible] of bonus)if(eligible&&(name.startsWith('detachment:')||unitUpgrade(a,name))){
+  if(name==='detachment:No Door Holds'){
+   g.detachmentUses=g.detachmentUses||{};if(g.detachmentUses[a.side+name]===useMark(g))continue;g.detachmentUses[a.side+name]=useMark(g);
+  }else if(!once(g,a,name,'phase'))continue;
+  writeLog(g,t.name+' used '+name.replace('detachment:','')+'.');return true;
+ }
  for(const [name,eligible,scope] of candidates){
   if(unitHasAbility(a,name)&&eligible(g,a,b,mode,weapon)&&once(g,a,`${kind}:${name}`,scope)){
    writeLog(g,`${t.name}: ${name} re-rolled one ${kind} die.`);return true;
@@ -507,19 +725,31 @@ function trySavingReroll(g,u,weapon,mode){
  return false;
 }
 function shockTest(g,u){
- const t=template(u),target=Number.isFinite(t.ld)?t.ld:7;
+ const t=template(u);
+ const leadershipBonus=t.name==='Infernal Berzerkers'&&living(g,u.side).some(v=>hasUpgrade(v,'Chain of Resolve')&&distance(u,v)*2<=6)?1:0;
+ const target=(Number.isFinite(t.ld)?t.ld:7)-leadershipBonus;
+ const testBonus=(unitUpgrade(u,'Breachmaster’s Seal')?1:0)+(u.painPurposeTurn===useMark(g)?1:0);
  const leaderName=t.leader&&u.leaderAlive!==false?t.leader.name:t.name;
  if(u.nextShockPass){u.nextShockPass=false;u.nextShockPenalty=0;u.battleshocked=false;writeLog(g,t.name+' automatically passed its next Battle-shock test (The Last Sentence).');return {roll:null,passed:true};}
- const penalty=u.nextShockPenalty||0;let roll=d6(g)+d6(g)-penalty;u.nextShockPenalty=0;
+ const penalty=u.nextShockPenalty||0;let roll=d6(g)+d6(g)-penalty+testBonus;u.nextShockPenalty=0;
  let rerolled=false;
  if(roll<target&&(((unitHasAbility(u,'Litany of Restraint')||unitHasAbility(u,'Oath Without End')||!t.leader?.abilities?.length&&/^(Infernal Chaplain|Orvath Krail)$/.test(leaderName)||unitHasAbility(u,'Line Held')&&g.objectives.some(o=>distance(u,o)<=1))&&!u.shockRerollUsed)||hasAbility(t,'Expeditionary Discipline')&&once(g,u,'shock:Expeditionary Discipline','battle'))){
-  u.shockRerollUsed=true;rerolled=true;writeLog(g,`${leaderName} used its once-per-battle Battle-shock re-roll.`);roll=d6(g)+d6(g)-penalty;
+  u.shockRerollUsed=true;rerolled=true;writeLog(g,`${leaderName} used its once-per-battle Battle-shock re-roll.`);roll=d6(g)+d6(g)-penalty+testBonus;
+ }
+ if(roll<target&&!rerolled){
+  const upgrade=hasUpgrade(u,'Remembrancer of Isstvan',{leaderOnly:true})?'Remembrancer of Isstvan':unitUpgrade(u,'Chain-Bound Governor')?'Chain-Bound Governor':null;
+  if(upgrade&&once(g,u,'shock:'+upgrade,'battle')){roll=d6(g)+d6(g)-penalty+testBonus;rerolled=true;writeLog(g,t.name+' used '+upgrade+'.');}
  }
  if(roll<target&&!rerolled){
   const forge=isVehicle(t)&&t.special?.daemon&&living(g,u.side).find(v=>unitHasAbility(v,'Independent Forge')&&distance(v,u)*2<=6&&availableUse(g,v,'shock:Independent Forge'));
   const boarding=transportSpec(t)&&living(g,u.side).find(v=>unitHasAbility(v,'Boarding Priority')&&distance(v,u)*2<=9&&availableUse(g,v,'shock:Boarding Priority','battle'));
   const owner=forge||boarding,name=forge?'Independent Forge':'Boarding Priority';
-  if(owner&&once(g,owner,'shock:'+name,forge?'turn':'battle')){roll=d6(g)+d6(g)-penalty;writeLog(g,template(owner).name+' used '+name+' for '+t.name+'.');}
+  if(owner&&once(g,owner,'shock:'+name,forge?'turn':'battle')){rerolled=true;roll=d6(g)+d6(g)-penalty+testBonus;writeLog(g,template(owner).name+' used '+name+' for '+t.name+'.');}
+ }
+ if(roll<target&&!rerolled){
+  const oldOath=g.phase==='movement'&&g.active===u.side&&!living(g,u.side).some(v=>v.moved||v.advancing)&&isIWMarine(t)&&living(g,u.side).some(v=>v.uid!==u.uid&&isIWMarine(template(v))&&distance(v,u)*2<=6);
+  const containment=isVehicle(t)&&t.special?.daemon&&!t.special?.alliedDaemon&&living(g,u.side).some(v=>((template(v).name==='Hadrak Voss'||template(v).leader?.name==='Hadrak Voss'&&v.leaderAlive!==false)&&distance(v,u)*2<=6)||template(v).name==='Forge Servitor Cohort'&&distance(v,u)*2<=3);
+  if(oldOath&&spendReaction(g,u,'The Old Oath')||containment&&spendReaction(g,u,'Containment Protocol')){roll=d6(g)+d6(g)-penalty+testBonus;rerolled=true;}
  }
  u.battleshocked=roll<target;
  writeLog(g,`${t.name} Battle-shock ${roll} vs ${target}+ — ${u.battleshocked?'FAILED (0 OC until Command phase)':'passed'}.`);
@@ -560,12 +790,14 @@ function abilityOptions(g,uid){
 }
 function useAbility(g,uid,name,targetId){
  if(!abilityOptions(g,uid).some(a=>a.name===name&&a.targetId===targetId))return {ok:false,message:'Ability unavailable: check its timing, range, target and remaining uses.'};
- const owner=g.units.find(u=>u.uid===uid),target=g.units.find(u=>u.uid===targetId);
+ const owner=g.units.find(u=>u.uid===uid),target=g.units.find(u=>u.uid===targetId);g.retargetWindow=null;
  const scope=['Harbinger of Blood','Battlefield Dislocation'].includes(name)?'battle':'turn';
  if(!once(g,owner,'action:'+name,scope))return {ok:false,message:'This ability has already been used.'};
  if(name==='Custodian of Engines'){
   const crew=living(g,owner.side).find(u=>hasAbility(template(u),'Maintenance Crew')&&distance(u,owner)*2<=3&&!u.maintenanceUsed);
   let restored=1;if(crew){restored=2;crew.maintenanceUsed=true;}
+  const relic=!crew&&living(g,owner.side).find(v=>unitUpgrade(v,'Pattern Reliquary')&&distance(v,target)*2<=3&&availableUse(g,v,'Pattern Reliquary','battle'));
+  if(relic){once(g,relic,'Pattern Reliquary','battle');restored=2;}
   target.injury=Math.max(0,target.injury-restored);
  }else if(name==='Serum Custodian'){
   const field=target.injury>0?'injury':'leaderInjury';target[field]=Math.max(0,target[field]-1);
@@ -624,16 +856,17 @@ function beginAdvance(g,uid){
  if(g.finished||!u||template(u).special?.immobile||u.moved||u.advancing||u.control==='pursuit'||g.phase!=='movement')return {ok:false,message:'Advance unavailable for that unit in this phase.'};
  const t=template(u);let roll=d6(g);
  if((unitHasAbility(u,'Legion Rush')||unitHasAbility(u,'Relic Mobility')||unitHasAbility(u,'Reaver Assault'))&&roll<=2){
-  roll=d6(g);writeLog(g,`${t.name} re-rolled its Advance die.`);
+  roll=d6(g);u.advanceRerolled=true;writeLog(g,`${t.name} re-rolled its Advance die.`);
  }
- if(hasAbility(t,'Pursuit Column')||hasAbility(t,'Fast Spearhead')||unitHasAbility(u,'Long March Doctrine'))roll++;
+ u.advanceBonus=(hasAbility(t,'Pursuit Column')||hasAbility(t,'Fast Spearhead')||unitHasAbility(u,'Long March Doctrine')?1:0)+(unitUpgrade(u,'Crimson Spur')?1:0)+(effect(g,u,'Redline Advance')?2:0);
+ roll+=u.advanceBonus;
  u.advancing=true;u.advanceRoll=roll;
  writeLog(g,`${t.name} Advanced: extra ${roll} inches (${Math.ceil(roll/2)} grid cells).`);
  return {ok:true,roll,extra:Math.ceil(roll/2)};
 }
-function canMove(g,uid,x,y){const u=living(g).find(x=>x.uid===uid);return !g.finished&&!!u&&!template(u).special?.immobile&&u.control!=='pursuit'&&u.side===g.active&&g.phase==='movement'&&!u.moved&&pathDistance(g,u,x,y)<=template(u).move+(u.advancing?Math.ceil((u.advanceRoll||0)/2):0)&&!(u.x===x&&u.y===y);}
+function canMove(g,uid,x,y){const u=living(g).find(x=>x.uid===uid);return !g.finished&&!!u&&!template(u).special?.immobile&&u.control!=='pursuit'&&u.side===g.active&&g.phase==='movement'&&!u.moved&&pathDistance(g,u,x,y)<=movementAllowance(g,u)+(u.advancing?Math.ceil((u.advanceRoll||0)/2):0)&&!(u.x===x&&u.y===y);}
 function move(g,uid,x,y){if(!canMove(g,uid,x,y))return {ok:false,message:'Illegal move: check movement phase, range and occupied terrain.'};
- const u=g.units.find(u=>u.uid===uid);u.x=x;u.y=y;u.moved=true;writeLog(g,`${template(u).name} moved to ${x+1},${y+1}.`);return {ok:true};}
+ const u=g.units.find(u=>u.uid===uid);g.retargetWindow=null;u.x=x;u.y=y;u.moved=true;writeLog(g,`${template(u).name} moved to ${x+1},${y+1}.`);return {ok:true};}
 function woundTarget(s,t){if(s>=t*2)return 2;if(s>t)return 3;if(s===t)return 4;if(s*2<=t)return 6;return 5;}
 function nullifierNear(g,defender){return living(g,defender.side).some(u=>template(u).special.nullifier&&distance(u,defender)<=2);}
 // Implement a conservative subset of named weapon traits. [test] annotations
@@ -691,11 +924,16 @@ function eligibleAttackProfiles(g,a,b,mode){
 function canAttack(g,aid,bid,mode){return eligibleAttackProfiles(g,g.units.find(u=>u.uid===aid),g.units.find(u=>u.uid===bid),mode).length>0;}
 function attack(g,attackerId,targetId,mode){
  const a=living(g).find(u=>u.uid===attackerId),b=living(g).find(u=>u.uid===targetId);
- const weapons=eligibleAttackProfiles(g,a,b,mode);
+ const weapons=eligibleAttackProfiles(g,a,b,mode).map(w=>({...w}));
+ if(a&&effect(g,a,'Anvil and Fang')?.targetId===b?.uid&&mode==='melee')for(const w of weapons)w.s++;
  if(!weapons.length)return {ok:false,message:'No legal attack: check phase, weapon range, line of sight, engagement and whether the unit has already attacked.'};
+ g.retargetWindow=null;
+ const hammerSelection=effect(g,a,'Hammer the Breach');
+ if(hammerSelection?.targetId===b.uid){const i=weapons.findIndex(w=>(w.sourceProfileId||w.name)===hammerSelection.weaponId);if(i>=0&&weapons[i].activeCount>1){const w=weapons[i];weapons.splice(i,1,{...w,activeCount:1},{...w,activeCount:w.activeCount-1,skipHammer:true});}}
  const at=template(a),bt=template(b),dist=distance(a,b);
  if(mode==='ranged')a.shot=true;else a.fought=true;
  if(unitHasAbility(a,'Dread Hunter')&&(bt.special?.psychic||targetKeyword(bt,'psyker'))&&once(g,a,'Dread Hunter','battle'))b.nextShockPenalty=(b.nextShockPenalty||0)+1;
+ const reactionCover=mode==='ranged'&&defensiveCover(g,b,a,weapons);
  const sealCover=mode==='ranged'&&hasActiveLeaderAbility(b,'Seal the Breach')&&/Void Breachers/i.test(bt.name)&&g.objectives.some(o=>distance(b,o)<=1)&&once(g,b,'cover:Seal the Breach','phase');
  let hits=0,wounds=0,unsaved=0,casualties=0,effective=0,attacks=0;
  g.bannonUsed=g.bannonUsed||{};g.bannonUsed[a.side]=g.bannonUsed[a.side]||{hit:false,wound:false};
@@ -718,7 +956,12 @@ function attack(g,attackerId,targetId,mode){
   // Lethal Hits and Sustained Hits are checked on an unmodified hit roll of 6.
   // Each successful hit is then resolved against the current surviving model.
   for(let i=0;i<attempts&&b.models>0;i++){
-   const hitRoll=clamp(weapon.skill+clamp(hitModifier+(!tr.torrent?(a.nextHitPenalty||0):0),-1,1),2,6);
+   const crossingEffect=effect(g,a,'Crossing Fires');
+   const crossingThisAttack=mode==='ranged'&&crossingEffect?.targetId===b.uid&&crossingEffect.remaining>0;
+   if(crossingThisAttack)crossingEffect.remaining--;
+   let nextPenalty=!tr.torrent?(a.nextHitPenalty||0):0;
+   if(mode==='melee'&&!tr.torrent&&nextPenalty+hitModifier>0&&unitUpgrade(a,'Pain-Sworn Standard')&&once(g,a,'Pain-Sworn Standard','battle'))nextPenalty=-hitModifier;
+   const hitRoll=clamp(weapon.skill+clamp(hitModifier+nextPenalty,-1,1),2,6);
    if(!tr.torrent)a.nextHitPenalty=0;
    let roll=tr.torrent?6:d6(g);
    let hitRerolled=false;
@@ -736,7 +979,7 @@ function attack(g,attackerId,targetId,mode){
    const repeat=critical?1+tr.sustainedHits:1;
    for(let extra=0;extra<repeat&&b.models>0;extra++){
     hits++;
-    const hasCover=mode==='ranged'&&(COVER.has(key(b.x,b.y))||indirect||sealCover);
+    const hasCover=mode==='ranged'&&(COVER.has(key(b.x,b.y))||indirect||sealCover||reactionCover);
     const thermic=hasCover&&!tr.ignoresCover&&unitHasAbility(a,'Thermic Line')&&once(g,a,'Thermic Line','battle');
     const leaderUp=!!bt.leader&&b.leaderAlive!==false;
     const bodyguards=b.models-(leaderUp?1:0);
@@ -760,11 +1003,17 @@ function attack(g,attackerId,targetId,mode){
     if(!autoWound&&wr+woundModifier<Math.min(woundTarget(weapon.s,bt.t),threshold))continue;
     wounds++;
     const bypass=tr.devastatingWounds&&!autoWound&&wr>=threshold;
+    const resolve=mode==='melee'&&unitHasKeyword(b,'TERMINATOR')&&spendReaction(g,b,'Cataphractii Resolve');
     if(!bypass){
      const coverBonus=hasCover&&!tr.ignoresCover&&!thermic?1:0;
      const siegeAP=unitHasAbility(a,'Siege Charge')&&targetKeyword(bt,'fortification')?1:0;
-     const save=clamp(defenderProfile.save+weapon.ap+siegeAP-coverBonus,2,7);
+     const bulkhead=mode==='melee'&&effect(g,a,'Bulkhead Breakers')?.targetId===b.uid?1:0;
+     const hammer=effect(g,a,'Hammer the Breach');
+     const hammerAP=mode==='ranged'&&!weapon.skipHammer&&hammer?.targetId===b.uid&&hammer.weaponId===(weapon.sourceProfileId||weapon.name)?1:0;
+     const crossingAP=crossingThisAttack&&extra===0?1:0;
+     const save=clamp(defenderProfile.save+weapon.ap+siegeAP+bulkhead+hammerAP+crossingAP-coverBonus,2,7);
      if(save<=6){let saving=d6(g);if(saving<save&&trySavingReroll(g,b,weapon,mode))saving=d6(g);if(saving>=save)continue;}
+     if(!targetLeader&&unitUpgrade(b,'Void-Tempered Ward')&&once(g,b,'Void-Tempered Ward','battle')){writeLog(g,bt.name+' used Void-Tempered Ward.');continue;}
     }
     unsaved++;
     const wp=targetLeader?bt.leader.wp:bt.wp;
@@ -772,7 +1021,10 @@ function attack(g,attackerId,targetId,mode){
     // FNP is rolled for *every* point of unsaved damage, not just those
     // needed to kill the current model. Excess damage does not spill over.
     let rawDamage=rollProfileValue(g,weapon.damageValue,weapon.damage,30)+(mode==='ranged'&&bonus?tr.melta:0);
+    if(resolve)rawDamage=Math.max(1,rawDamage-1);
     if(hasAbility(bt,'Armoured Flight'))rawDamage=Math.max(1,rawDamage-1);
+    const aegis=targetLeader?bt.leader?.enhancement?.name==='Oath-Wrought Aegis':bt.isLeader&&bt.enhancement?.name==='Oath-Wrought Aegis';
+    if(!bypass&&aegis&&once(g,b,'Oath-Wrought Aegis','battle'))rawDamage=Math.max(1,rawDamage-1);
     if(rawDamage===2&&hasAbility(bt,'Relic Plate')&&once(g,b,'damage:Relic Plate','battle'))rawDamage=1;
     let damage=0;
     for(let p=0;p<rawDamage;p++)if(!(special.fnp&&d6(g)>=special.fnp))damage++;
@@ -800,6 +1052,7 @@ function attack(g,attackerId,targetId,mode){
   }
  }
  if(mode==='ranged'){
+  if(unsaved){b.unsavedBy=b.unsavedBy?.phase===useMark(g,'phase')?b.unsavedBy:{phase:useMark(g,'phase'),ids:[]};b.unsavedBy.ids.push(a.uid);}
   b.shotBy=b.shotBy?.turn===g.round+'-'+g.active?b.shotBy:{turn:g.round+'-'+g.active,ids:[]};b.shotBy.ids.push(a.uid);
  }
  for(const weapon of weapons)if(weaponTraits(weapon).hazardous){
@@ -810,6 +1063,8 @@ function attack(g,attackerId,targetId,mode){
   }
  }
  writeLog(g,`${at.name} ${mode==='ranged'?'fired on':'struck'} ${bt.name}: ${hits}/${attacks} hits, ${wounds} wounds, ${effective} damage, ${casualties} models removed${b.models===0?' — DESTROYED':''}.`);
+ if(casualties)casualtyReaction(g,b);
+ if(!b.models&&g.directed?.[a.side]===b.uid&&living(g,a.side).some(u=>unitUpgrade(u,'War Hounds’ Field Manual')&&availableUse(g,u,'War Hounds’ Field Manual','battle')))g.retargetWindow={side:a.side,phase:useMark(g,'phase')};
  return {ok:true,attacks,hits,wounds,unsaved,damage:effective,casualties,eliminated:b.models===0};
 }
 
@@ -821,12 +1076,14 @@ function canCharge(g,aid,bid){
 }
 function charge(g,aid,bid){
  if(!canCharge(g,aid,bid))return {ok:false,message:'Charge unavailable. Check the charge phase, movement restrictions and a target 2–6 squares away.'};
- const a=g.units.find(u=>u.uid===aid),b=g.units.find(u=>u.uid===bid);a.charged=true;
+ const a=g.units.find(u=>u.uid===aid),b=g.units.find(u=>u.uid===bid);g.retargetWindow=null;a.charged=true;
  let first=d6(g),second=d6(g),roll=first+second+(a.transportChargeBonus||0);
  const adj=[[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dy])=>({x:b.x+dx,y:b.y+dy})).filter(p=>walkable(g,p.x,p.y,a.uid)).map(p=>({...p,steps:pathDistance(g,a,p.x,p.y)})).sort((a,b)=>a.steps-b.steps);
  if(adj.length&&adj[0].steps*2>roll){
   const t=template(a),target=template(b);
   const chargeRule=[
+   ['The Measured Strike',unitUpgrade(a,'The Measured Strike')],
+   ...['Shock Assault','Pressurised Entry','Reserves in Step'].map(n=>[n,effect(g,a,n)?.targetId===b.uid]),
    ['Blood-Bound Hunt',true],['Blood God’s Assault',true],
    ['Last Order',true],
    ['Skyborne Commander',a.reserveKind==='deepstrike'&&a.arrivedTurn===g.round+'-'+g.active],
@@ -837,7 +1094,7 @@ function charge(g,aid,bid){
    ['Armoured Breakthrough',a.disembarkedTurn===g.round+'-'+g.active],
    ['Blood-Earned Discipline',g.objectives.some(o=>distance(b,o)<=1)],
    ['Greater Daemon',true]
-  ].find(([n,eligible])=>eligible&&unitHasAbility(a,n)&&availableUse(g,a,'charge:'+n,chargeScope(n)));
+  ].find(([n,eligible])=>eligible&&(unitHasAbility(a,n)||unitUpgrade(a,n)||effect(g,a,n))&&availableUse(g,a,'charge:'+n,chargeScope(n)));
   const commander=!chargeRule&&a.arrivedTurn===g.round+'-'+g.active&&living(g,a.side).find(u=>unitHasAbility(u,'Void Deployment')&&availableUse(g,u,'Void Deployment','battle'));
   if(!chargeRule&&(a.transportChargeReroll||commander)){
    if(first<=second)first=d6(g);else second=d6(g);roll=first+second+(a.transportChargeBonus||0);
@@ -845,12 +1102,13 @@ function charge(g,aid,bid){
    else{once(g,commander,'Void Deployment','battle');writeLog(g,template(commander).name+' used Void Deployment for one arrival Charge re-roll.');}
   }
   if(chargeRule&&once(g,a,'charge:'+chargeRule[0],chargeScope(chargeRule[0]))){
-   if(chargeRule[0]==='Greater Daemon'){first=d6(g);second=d6(g);}else if(first<=second)first=d6(g);else second=d6(g);
-   roll=first+second+(a.transportChargeBonus||0);writeLog(g,`${t.name}: ${chargeRule[0]} re-rolled ${chargeRule[0]==='Greater Daemon'?'both charge dice':'one charge die'}.`);
+   if(['Greater Daemon','The Measured Strike'].includes(chargeRule[0])){first=d6(g);second=d6(g);}else if(first<=second)first=d6(g);else second=d6(g);
+   roll=first+second+(a.transportChargeBonus||0);writeLog(g,`${t.name}: ${chargeRule[0]} re-rolled ${['Greater Daemon','The Measured Strike'].includes(chargeRule[0])?'both charge dice':'one charge die'}.`);
   }
  }
  if(!adj.length||adj[0].steps*2>roll){writeLog(g,`${template(a).name} failed charge against ${template(b).name} (${roll}).`);return {ok:true,success:false,roll};}
- a.x=adj[0].x;a.y=adj[0].y;a.chargeSuccess=true;writeLog(g,`${template(a).name} charged ${template(b).name} (${roll}).`);
+ a.x=adj[0].x;a.y=adj[0].y;a.chargeSuccess=true;a.chargedTarget=b.uid;
+ if(iwAssault(a)&&hasDetachment(g,a.side,'Crimson Onslaught')){g.furyTurns=g.furyTurns||{};if(g.furyTurns[a.side]!==useMark(g)){g.furyTurns[a.side]=useMark(g);a.controlledFuryTurn=useMark(g);}}writeLog(g,`${template(a).name} charged ${template(b).name} (${roll}).`);
  const t=template(a);
  for(const ability of ['Falling Spear','Impact Assault'])if(unitHasAbility(a,ability)&&once(g,a,'charge:'+ability,'battle')&&d6(g)>=4)applyMortalWounds(g,b,1);
  if(unitHasAbility(a,'Shock Fright')&&once(g,a,'charge:Shock Fright','battle'))shockTest(g,b);
@@ -864,6 +1122,7 @@ function chargeScope(name){return ['Blood-Earned Discipline','Blood-Bound Hunt',
 function objectiveOwner(g,o){
  const tally={player:0,enemy:0};
  for(const u of living(g))if(distance(u,o)<=1){const t=template(u);
+  tally[u.side]+=u.battleshocked?0:(u.extraOCTurn===useMark(g)?u.models:0);
   tally[u.side]+=u.battleshocked?0:t.leader?Math.max(0,u.models-(u.leaderAlive!==false?1:0))*t.oc+(u.leaderAlive!==false?t.leader.oc:0):u.models*t.oc;
  }
  if(tally.player===tally.enemy)return null;return tally.player>tally.enemy?'player':'enemy';
@@ -940,7 +1199,7 @@ function aiTurn(g,side,options={}){
    const foes=living(g,side==='player'?'enemy':'player');if(!foes.length)break;
    const old={x:a.x,y:a.y};
    for(let x=0;x<WIDTH;x++)for(let y=0;y<HEIGHT;y++){
-    const steps=pathDistance(g,a,x,y);if(steps>template(a).move)continue;
+    const steps=pathDistance(g,a,x,y);if(steps>movementAllowance(g,a))continue;
     const objectiveDist=Math.min(...g.objectives.map(o=>distance({x,y},o)));
     const enemyDist=Math.min(...foes.map(o=>distance({x,y},o)));
     const score=-objectiveDist*3 -enemyDist*.55 +(steps>0?.12:0)+(COVER.has(key(x,y))?.25:0)+random(g)*.12;
@@ -949,34 +1208,34 @@ function aiTurn(g,side,options={}){
    if(best&&(best.x!==old.x||best.y!==old.y)){a.x=best.x;a.y=best.y;a.moved=true;}
   }
  }
- if(begin<=1){g.phase='reinforcements';autoDeployReserves(g,side);autoDisembark(g,side);autoAbilities(g,side);}
+ if(begin<=1){g.phase='reinforcements';autoDeployReserves(g,side);autoDisembark(g,side);autoAbilities(g,side);for(const u of living(g,side))autoStratagem(g,u);}
  if(begin<=2){
-  g.phase='shooting';autoAbilities(g,side);
+  g.phase='shooting';autoAbilities(g,side);autoCoordinate(g,side);
   for(const a of [...living(g,side)]){
    if(a.shot)continue;
    const targets=living(g,side==='player'?'enemy':'player').filter(b=>canAttack(g,a.uid,b.uid,'ranged')).sort((x,y)=>distance(a,x)-distance(a,y));
-   if(targets.length)attack(g,a.uid,targets[0].uid,'ranged');
+   if(targets.length){autoStratagem(g,a,targets[0]);attack(g,a.uid,targets[0].uid,'ranged');autoRetarget(g,side);}
   }
  }
  if(begin<=3){
   g.phase='charge';
   for(const a of [...living(g,side)]){
    const targets=living(g,side==='player'?'enemy':'player').filter(b=>canCharge(g,a.uid,b.uid)).sort((x,y)=>distance(a,x)-distance(a,y));
-   if(targets.length&&distance(a,targets[0])<=4)charge(g,a.uid,targets[0].uid);
+   if(targets.length&&distance(a,targets[0])<=4){autoStratagem(g,a,targets[0]);charge(g,a.uid,targets[0].uid);}
   }
  }
  if(begin<=4){
-  g.phase='fight';
+  g.phase='fight';autoCoordinate(g,side);
   for(const a of [...living(g,side)]){
    if(a.fought)continue;
    const targets=living(g,side==='player'?'enemy':'player').filter(b=>(a.control!=='pursuit'||nearestEnemy(g,a)?.uid===b.uid)&&distance(a,b)<=template(a).melee.range).sort((x,y)=>status(x).hp-status(y).hp);
-   if(targets.length)attack(g,a.uid,targets[0].uid,'melee');
+   if(targets.length){autoStratagem(g,a,targets[0]);attack(g,a.uid,targets[0].uid,'melee');autoRetarget(g,side);}
   }
  }
  scoreTurn(g,side);checkFinished(g);
 }
 function advance(g){
- if(g.finished)return;
+ if(g.finished)return;g.retargetWindow=null;
  if(g.active!=='player')return;
  const phases=['movement','reinforcements','shooting','charge','fight'];
  const i=phases.indexOf(g.phase);if(i<0)return;
@@ -996,16 +1255,16 @@ function finishByAuto(g){
  const initialRound=g.round;
  let cycles=0;
  while(!g.finished&&cycles++<MAX_ROUNDS*3){
-  if(g.active==='player')aiTurn(g,'player',{resume:g.round===initialRound});if(g.finished)break;
+  if(g.active==='player')aiTurn(g,'player',{resume:true});if(g.finished)break;
   aiTurn(g,'enemy');if(g.finished)break;
   g.round++;if(checkFinished(g))break;startTurn(g,'player');
  }
  return g;
 }
-function battleLab(player,enemy,count=10,seed=1111,deployment=null){
+function battleLab(player,enemy,count=10,seed=1111,deployment=null,armyOptions={}){
  const results=[],n=clamp(Math.round(count)||10,1,100);
  for(let i=0;i<n;i++){
-  const g=finishByAuto(createGame({player,enemy,deployment,seed:(seed+i*7919)>>>0}));
+  const g=finishByAuto(createGame({...armyOptions,player,enemy,deployment,seed:(seed+i*7919)>>>0}));
   results.push({game:i+1,seed:g.seed,winner:g.winner,playerVP:g.score.player,enemyVP:g.score.enemy,playerSurvivors:living(g,'player').length,enemySurvivors:living(g,'enemy').length});
  }
  return results;
@@ -1033,9 +1292,14 @@ function validateLoadedState(g){
  if(!Number.isInteger(g.round)||g.round<1||g.round>6||!Number.isInteger(g.seedState)||!['movement','reinforcements','shooting','charge','fight','finished'].includes(g.phase)||!['player','enemy'].includes(g.active)||!Number.isFinite(g.score.player)||!Number.isFinite(g.score.enemy))throw Error('Save file has invalid battle state.');
  if(living(g).some((u,i,arr)=>arr.slice(i+1).some(v=>v.x===u.x&&v.y===u.y)))throw Error('Multiple units occupy the same square.');
  if(!g.settings||!Array.isArray(g.settings.player)||!Array.isArray(g.settings.enemy))throw Error('Save file has invalid muster data.');
- if(musterProblems(g.settings.player).length||musterProblems(g.settings.enemy).length)throw Error('Saved muster violates current source catalogue limits.');
+ const rules=normalizeArmyRules(g.settings.armyRules,g.settings.pointsLimit||2000);normalizeCP(g.settings.cpRules);
+ if(g.settings.cpRules&&!g.cp)throw Error('Save is missing its CP balance.');
+ if(g.settings.pointsLimit&&(![500,1000,2000,3000].includes(g.settings.pointsLimit)||['player','enemy'].some(s=>total(g.settings[s])>g.settings.pointsLimit)))throw Error('Saved muster exceeds its points limit.');
+ if(g.cp&&['player','enemy'].some(s=>!Number.isInteger(g.cp[s])||g.cp[s]<0||g.cp[s]>1000))throw Error('Invalid saved CP.');
+ if(musterProblems(g.settings.player,rules.player,g.settings.pointsLimit).length||musterProblems(g.settings.enemy,rules.enemy,g.settings.pointsLimit).length)throw Error('Saved muster violates current source catalogue limits.');
  if(g.units.some(u=>u.painPenalty!==undefined&&u.painPenalty!==0&&u.painPenalty!==1))throw Error('Save contains invalid Pain-Control state.');
  for(const u of g.units){
+  if(u.moveModifiers!==undefined&&(!Array.isArray(u.moveModifiers)||u.moveModifiers.length>8||u.moveModifiers.some(m=>!m||typeof m.id!=='string'||m.id.length>80||m.kind!=='characteristic'||!Number.isInteger(m.amount)||Math.abs(m.amount)>24||!/^\d+-(player|enemy)$/.test(m.turn))))throw Error('Invalid saved movement modifier.');
   const t=BY_ID[u.template];
   if(!t.leader)continue;
   // Version-2 saves from Alpha 0.7 had a last-survivor Leader but no
@@ -1051,5 +1315,5 @@ function validateLoadedState(g){
  for(const u of g.units)pinBattleProfile(u);
  return g;
 }
-return {WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,applyMortalWounds,embarkedUnits,canDisembark,disembark,autoDisembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,abilityOptions,useAbility,attackProfiles,canAttack,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
+return {REACTIONS,movementAllowance,coordinatedOptions,coordinatedAttack,retargetOptions,retargetDirected,DETACHMENTS,STRATAGEMS,normalizeArmyRules,normalizeCP,stratagemOptions,useStratagem,rerollAdvance,WIDTH,HEIGHT,MAX_ROUNDS,transportSpec,passengerSpaces,applyMortalWounds,embarkedUnits,canDisembark,disembark,autoDisembark,emergencyDisembark,normalizeDeployment,reserveUnits,deployReserve,invokeBloodletters,canDeployReserve,autoDeployReserves,shockTest,abilityOptions,useAbility,attackProfiles,canAttack,weaponTraits,startTurn,beginAdvance,nearestEnemy,lostCohortControl,supervisingChaplain,declareDirectedObjective,musterProblems,FACTIONS,TEMPLATES,BY_ID,registerLinked,registerConfiguration,DEFAULT_PLAYER,DEFAULT_ENEMY,OBJECTIVES,COVER,WALLS,createGame,template,living,status,total,distance,hasLineOfSight,rollProfileValue,pathDistance,validCell,canMove,move,attack,canCharge,charge,objectiveOwner,advance,aiTurn,finishByAuto,battleLab,validateLoadedState};
 });

@@ -10,7 +10,7 @@ const $=id=>document.getElementById(id);
 const html=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const copy=a=>[...a];
 const initialPlayer=copy(E.DEFAULT_PLAYER),initialEnemy=copy(E.DEFAULT_ENEMY);
-const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},deployment:{player:initialPlayer.map(()=>'field'),enemy:initialEnemy.map(()=>'field')},placement:null,configEditor:null,selected:null,editor:'player',filter:'ALL',tierFilter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
+const state={game:E.createGame(),musters:{player:initialPlayer,enemy:initialEnemy},deployment:{player:initialPlayer.map(()=>'field'),enemy:initialEnemy.map(()=>'field')},placement:null,configEditor:null,selected:null,editor:'player',filter:'ALL',tierFilter:'ALL',search:'',linkedCounts:cachedCounts,syncRunning:false,lastSyncCheck:0,pointsLimit:1000,armyRules:{player:[],enemy:[]},cpRules:{initial:0,perTurn:0,reactions:false},feedback:'Select a friendly unit. Click an empty tile to move.',feedbackError:false,lab:null};
 const factionName=t=>E.FACTIONS[t.faction]?.name||'Unknown';
 const tier=t=>LIVE?.statusFor(t)||'sim-estimate';
 const tierLabel=t=>({'verified':'VERIFIED','synced':'SYNCED','sim-estimate':'SIM ESTIMATE'})[tier(t)];
@@ -28,9 +28,9 @@ function phaseLabel(phase){return ({movement:'Movement',reinforcements:'Reinforc
 function renderScore(){
  const g=state.game,player=E.living(g,'player'),enemy=E.living(g,'enemy'),playerReserves=E.reserveUnits(g,'player'),enemyReserves=E.reserveUnits(g,'enemy'),playerEmbarked=E.embarkedUnits(g,'player'),enemyEmbarked=E.embarkedUnits(g,'enemy');
  const pTotal=g.units.filter(u=>u.side==='player').reduce((n,u)=>n+tFor(u).points,0),eTotal=g.units.filter(u=>u.side==='enemy').reduce((n,u)=>n+tFor(u).points,0);
- $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} field / ${playerReserves.length} reserve / ${playerEmbarked.length} embarked · ${pTotal} pts</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
+ $('scoreboard').innerHTML=`<div class="score team-player"><div><div class="score-title">Friendly · Commander</div><div class="score-sub">${player.length} field / ${playerReserves.length} reserve / ${playerEmbarked.length} embarked · ${pTotal} pts · ${g.cp?.player||0} CP</div></div><div><div class="metric">${g.score.player}<small style="font-size:11px;font-weight:650"> VP</small></div></div></div>
  <div class="score center"><div class="score-title">BATTLE ROUND ${Math.min(g.round,E.MAX_ROUNDS)} / ${E.MAX_ROUNDS}</div><div class="metric">${phaseLabel(g.phase)}</div><div class="score-sub">${g.finished?(g.winner==='draw'?'DRAW':(g.winner==='player'?'FRIENDLY':'OPPOSING')+' VICTORY'):'Your turn'}</div></div>
- <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} field / ${enemyReserves.length} reserve / ${enemyEmbarked.length} embarked · ${eTotal} pts</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
+ <div class="score team-enemy"><div><div class="score-title">Opposing · AI</div><div class="score-sub">${enemy.length} field / ${enemyReserves.length} reserve / ${enemyEmbarked.length} embarked · ${eTotal} pts · ${g.cp?.enemy||0} CP</div></div><div class="metric">${g.score.enemy}<small style="font-size:11px;font-weight:650"> VP</small></div></div>`;
 }
 function isTargetable(attacker,target){
  const g=state.game;
@@ -73,10 +73,16 @@ function renderInspector(){
  ${t.special?.lost&&t.special?.mandatoryChaplain?`<p class="muster-rule-warning">Lost Cohort control: ${html(u.control||'controlled')}${u.leaderAlive===false?' · original Chaplain lost':''}. Objective Control retained unless Battle-shocked.</p>`:''}
  ${u.battleshocked?'<p class="muster-rule-warning">Battle-shocked: 0 Objective Control until next Command phase.</p>':''}
  ${u.side==='player'&&state.game.phase==='movement'&&!t.special?.immobile&&!u.moved&&!u.advancing?`<button type="button" class="tiny-button" data-advance-unit="${html(u.uid)}">Advance (roll D6, restrict shooting/charge)</button>`:''}
+ ${u.side==='player'&&u.advancing&&!u.moved&&!u.advanceRerolled?`<button type="button" class="tiny-button" data-vox-advance="${html(u.uid)}">Vox-Directed Advance re-roll (once per round)</button>`:''}
+ ${u.side==='player'?E.coordinatedOptions(state.game,u.uid).map(a=>`<button type="button" class="tiny-button" data-coord-unit="${html(u.uid)}" data-coord-kind="${html(a.kind)}" data-coord-partner="${html(a.partnerId)}" data-coord-target="${html(a.targetId)}" data-coord-choice="${html(a.choice)}">${html(a.label)}</button>`).join(''):''}
+ ${u.side==='player'?E.stratagemOptions(state.game,u.uid).map(a=>`<button type="button" class="tiny-button" data-strat-unit="${html(u.uid)}" data-strat-name="${html(a.name)}" data-strat-target="${html(a.targetId)}" data-strat-weapon="${html(a.weaponId)}">${html(a.label)}</button>`).join(''):''}
  ${u.side==='player'?E.abilityOptions(state.game,u.uid).map(a=>`<button type="button" class="tiny-button" data-ability-owner="${html(u.uid)}" data-ability-name="${html(a.name)}" data-ability-target="${html(a.targetId)}">${html(a.label)}</button>`).join(''):''}
  ${u.advancing?`<p class="muted">Advanced +${u.advanceRoll} inches this turn: only Assault weapons may shoot; cannot charge.</p>`:''}
+ ${t.enhancement?`<p class="muted">Paid upgrade: <strong>${html(t.enhancement.name)}</strong> · ${t.enhancement.points} pts. ${html(t.enhancement.description)}</p>`:''}
+ ${t.leader?.enhancement?`<p class="muted">Leader Enhancement: <strong>${html(t.leader.enhancement.name)}</strong> · ${t.leader.enhancement.points} pts.</p>`:''}
  ${t.abilities?.length?`<details class="unit-audit"><summary>Source abilities &amp; combat coverage</summary><ul>${t.abilities.filter(a=>!/^ROSTER CARD/.test(a.name)).slice(0,30).map(a=>`<li><strong>${a.coverage==='modeled'?'Modeled':a.coverage==='partial'?'Partial':'Reference only'}</strong> — ${html(a.name)}: ${html(a.description.slice(0,360))}</li>`).join('')}</ul></details>`:''}
  ${u.side==='enemy'&&state.game.active==='player'&&state.game.phase==='movement'&&!state.game.directed?.player?`<button type="button" class="tiny-button" data-direct-target="${html(u.uid)}">Mark as Directed Objective</button>`:''}
+ ${E.retargetOptions(state.game).filter(a=>a.targetId===u.uid).map(a=>`<button type="button" class="tiny-button" data-retarget-owner="${html(a.ownerId)}" data-retarget-target="${html(a.targetId)}">${html(a.label)}</button>`).join('')}
  ${state.game.directed?.player===u.uid?'<p class="muted">★ Directed Objective designated for friendly Infernal Warriors.</p>':''}
  <p class="profile-note">${tierTag(t)} ${html(t.description)}</p>${u.painPenalty?'<p class="muster-rule-warning">Warp-Aggravated Pain: −1 ranged Hit until your next Command phase.</p>':''}<p class="muted">${u.moved?'✓ Moved':'• Not moved'} · ${u.shot?'✓ Fired':'• Ready to fire'} · ${u.charged?'✓ Charge tried':'• Charge available'} · ${u.fought?'✓ Fought':'• Fight available'}</p>`;
 }
@@ -146,8 +152,10 @@ function clickedCell(x,y){
  if(u?.side==='enemy'){state.selected=u.uid;message(`Inspecting opposing unit: ${tFor(u).name}.`);renderBattle();return;}
  message('Select a friendly unit, then a valid tile or enemy target.',true);
 }
+function armyOptions(){return {armyRules:state.armyRules,cpRules:state.cpRules,pointsLimit:state.pointsLimit};}
+function rosterProblems(ids,side){return E.musterProblems(ids,state.armyRules[side],state.pointsLimit);}
 function resetBattle(){
- try{state.game=E.createGame({player:state.musters.player,enemy:state.musters.enemy,deployment:state.deployment,seed:Date.now()>>>0});state.selected=null;state.placement=null;message('New battle deployed. Select a friendly unit.');renderBattle();tab('battle');}
+ try{state.game=E.createGame({...armyOptions(),player:state.musters.player,enemy:state.musters.enemy,deployment:state.deployment,seed:Date.now()>>>0});state.selected=null;state.placement=null;message('New battle deployed. Select a friendly unit.');renderBattle();tab('battle');}
  catch(err){message(err.message,true);tab('battle');}
 }
 function configurable(t){const base=E.BY_ID[t?.baseId]||t;return !!(LIVE&&base?.faction==='IW'&&base.source==='linked'&&base.formationConfigs?.length);}
@@ -164,6 +172,9 @@ function showConfig(side,index){
  ${base.wargearLimits?.length?`<p class="muted">Source-enforced wargear quotas: ${base.wargearLimits.map(x=>html(x.description)).join(" · ")}</p>`:""}
  ${select('Squad size','formation',null,base.formationConfigs.map(f=>({...f,label:`${f.label}`})),form.id)}
  <div class="gear-editor">${(t.equipmentSlots||form.slots).map(slot=>select(slot.name,'gear',slot.id,slot.choices,gear[slot.id]||slot.selectedId)).join('')}</div>
+ ${select('Unit Enhancement / Upgrade (one paid choice)','enhancement',null,[{id:'',label:'None',points:0},...(base.enhancementOptions||[]).filter(e=>state.armyRules[side].includes(e.detachment)).map(e=>({...e,label:e.name}))],t.enhancement?.id||'')}
+ ${t.enhancement?.name==='Dismantler’s Charge'?select('Designated model’s melee weapon','enhancementWeapon',null,t.loadout.filter(w=>w.mode==='melee'&&!w.isLeader).filter((w,i,a)=>a.findIndex(x=>x.sourceProfileId===w.sourceProfileId)===i).map(w=>({id:w.sourceProfileId,label:w.name})),t.enhancementWeapon):''}
+ ${t.leader?select('Attached Chaplain Enhancement (paid separately)','leaderEnhancement',null,[{id:'',label:'None',points:0},...(E.BY_ID[t.leader.id]?.enhancementOptions||[]).filter(e=>state.armyRules[side].includes(e.detachment)).map(e=>({...e,label:e.name}))],t.leader.enhancement?.id||''):''}
  ${!base.special?.mandatoryChaplain&&leaderOptions.length?select('Attached Leader (paid once)','leader',null,[{id:'',label:'None',points:0},...leaderOptions.map(x=>({...x,label:x.name}))],t.leaderId||''):''}
  ${base.special?.mandatoryChaplain?'<p class="muted">This Lost Cohort formation already includes its mandatory Chaplain cost; its Chaplain has independent wounds and can be targeted by Precision weapons. No duplicate Leader is added.</p>':''}
  <p class="muted">The attached Leader acts within this squad on the battlefield (simplified last-survivor and wounds rules).</p></div>`;
@@ -171,10 +182,13 @@ function showConfig(side,index){
 function updateConfiguration(side,index,kind,selected,slotId){
  const current=E.BY_ID[state.musters[side]?.[index]],base=E.BY_ID[current?.baseId]||current;
  if(!configurable(current))return;
- const opts={formationId:current.selectedFormation||base.defaultFormationId,gear:{...(current.selectedGear||{})},leaderId:current.leaderId||null};
+ const opts={formationId:current.selectedFormation||base.defaultFormationId,gear:{...(current.selectedGear||{})},leaderId:current.leaderId||null,enhancementId:current.enhancement?.id||null,leaderEnhancementId:current.leader?.enhancement?.id||null,enhancementWeapon:current.enhancementWeapon||null};
  if(kind==='formation'){opts.formationId=selected;opts.gear={};}
  else if(kind==='gear'){opts.gear[slotId]=selected;}
- else if(kind==='leader'){opts.leaderId=selected||null;}
+ else if(kind==='leader'){opts.leaderId=selected||null;opts.leaderEnhancementId=null;}
+ else if(kind==='enhancement'){opts.enhancementId=selected||null;opts.enhancementWeapon=current.loadout?.find(w=>w.mode==='melee'&&!w.isLeader)?.sourceProfileId||null;}
+ else if(kind==='leaderEnhancement')opts.leaderEnhancementId=selected||null;
+ else if(kind==='enhancementWeapon')opts.enhancementWeapon=selected||null;
  else return;
  try{
   const allLeaders=E.TEMPLATES.filter(x=>x.source==='linked'&&x.visible!==false&&x.isLeader);
@@ -183,24 +197,35 @@ function updateConfiguration(side,index,kind,selected,slotId){
   if(variant.leaderId&&variant.leader?.name!=='Infernal Chaplain'&&state.musters[side].some((id,i)=>i!==index&&E.BY_ID[id]?.leaderId===variant.leaderId))throw Error('This named Leader is already attached to another squad.');
   E.registerConfiguration(variant);
   const updated=[...state.musters[side]];updated[index]=variant.id;
-  const errors=E.musterProblems(updated);if(errors.length)throw Error(errors[0]);
+  const errors=rosterProblems(updated,side);if(errors.length)throw Error(errors[0]);
   state.musters[side]=updated;if(variant.special?.aircraft&&state.deployment[side][index]==='field')state.deployment[side][index]='reserve';renderBuilder();
  }catch(error){showSyncStatus('Configuration rejected',error.message);renderBuilder();}
 }
 function configuredSpecs(){
  const ids=new Set([...state.musters.player,...state.musters.enemy,...state.game.units.map(u=>u.template)]);
- return [...ids].map(id=>E.BY_ID[id]).filter(t=>t?.baseId).map(t=>({baseId:t.baseId,sourceVersion:t.sourceVersion,formationId:t.selectedFormation,gear:t.selectedGear||{},leaderId:t.leaderId||null}));
+ return [...ids].map(id=>E.BY_ID[id]).filter(t=>t?.baseId).map(t=>({baseId:t.baseId,sourceVersion:t.sourceVersion,formationId:t.selectedFormation,gear:t.selectedGear||{},leaderId:t.leaderId||null,enhancementId:t.enhancement?.id||null,leaderEnhancementId:t.leader?.enhancement?.id||null,enhancementWeapon:t.enhancementWeapon||null}));
 }
 function restoreConfigurations(obj){
  for(const spec of obj.configurations||[]){
   if(!spec||typeof spec.baseId!=='string'||!spec.baseId.startsWith('nr-')||typeof spec.sourceVersion!=='string')throw Error('Invalid saved unit configuration.');
   const base=E.BY_ID[spec.baseId];
   if(!base||base.sourceVersion!==spec.sourceVersion)throw Error('Saved roster uses an older New Recruit revision. Sync the catalogue, then rebuild that formation.');
-  const v=LIVE.configureUnit(base,{formationId:spec.formationId,gear:spec.gear,leaderId:spec.leaderId},E.TEMPLATES.filter(t=>t.isLeader&&t.visible!==false&&t.source==='linked'));
+  const v=LIVE.configureUnit(base,{formationId:spec.formationId,gear:spec.gear,leaderId:spec.leaderId,enhancementId:spec.enhancementId,leaderEnhancementId:spec.leaderEnhancementId,enhancementWeapon:spec.enhancementWeapon},E.TEMPLATES.filter(t=>t.isLeader&&t.visible!==false&&t.source==='linked'));
   E.registerConfiguration(v);
  }
 }
+function renderArmyRules(){
+ const el=$('army-rules');if(!el)return;
+ const side=state.editor,selected=state.armyRules[side],dp=selected.reduce((n,key)=>n+E.DETACHMENTS[key],0);
+ el.innerHTML=`<h3>Infernal Warriors army configuration</h3><p class="muted">Editing ${side==='player'?'friendly':'opposing'} force · ${dp} / ${state.pointsLimit===1000?2:3} Detachment Points. Choose the detachments that unlock your paid unit upgrades.</p>
+ <div class="army-rule-choices">${Object.entries(E.DETACHMENTS).map(([name,cost])=>`<label><input type="checkbox" data-detachment="${html(name)}" ${selected.includes(name)?'checked':''} ${![1000,2000].includes(state.pointsLimit)?'disabled':''}> ${html(name)} · ${cost} DP</label>`).join('')}</div>
+ <div class="gear-editor"><label>Starting CP per side (scenario setting)<input type="number" id="starting-cp" min="0" max="12" value="${state.cpRules.initial}"></label><label>CP gained at each own turn start<input type="number" id="turn-cp" min="0" max="3" value="${state.cpRules.perTurn}"></label></div>
+ <label class="reaction-choice"><input id="automatic-reactions" type="checkbox" ${state.cpRules.reactions?'checked':''}> Automatically spend CP on eligible defensive reactions for both sides</label>
+ <p class="muted">CP defaults to zero because the catalogue does not specify a mission pack or CP income. Use your agreed scenario values, including the first turn. Supported stratagems appear on eligible selected units.</p>
+ <details><summary>Current detachment coverage</summary><p class="muted">Crimson Onslaught’s first-charge Hit re-roll and Breach and Ruin’s charge Wound re-roll are modeled. War Hounds’ Legacy and Iron Reavers offer joint attacks at phase start; choose both eligible units’ shared target and re-roll recipient before attacks resolve. Defensive reactions use the optional automatic order above and spend CP at the trigger. No Quarter Asked and mission dispositions remain reference rules; its “nearby” range is undefined in the catalogue.</p></details>`;
+}
 function renderBuilder(){
+ renderArmyRules();
  const side=state.editor,points=E.total(state.musters[side]),linkedFactions=new Set(Object.entries(state.linkedCounts).filter(([,n])=>n>0).map(([f])=>f));
  const needle=state.search.toLowerCase().trim();
  const available=E.TEMPLATES.filter(t=>{
@@ -217,22 +242,23 @@ function renderBuilder(){
  if($('unit-search').value!==state.search)$('unit-search').value=state.search;
  $('verification-counts').textContent=`${counts.verified} Verified · ${counts.synced} Synced · ${counts['sim-estimate']} Sim Estimate`;
  $('catalogue-count').textContent=`(${list.length} available${needle||state.tierFilter!=='ALL'?' · filtered':''})`;
- $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span> ${tierTag(t)}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p><details class="unit-audit"><summary>Verification details</summary><ul>${profileNotes(t).map(note=>`<li>${html(note)}</li>`).join('')}</ul></details></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit||E.musterProblems([...state.musters[side],t.id]).length?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):
+ $('unit-catalogue').innerHTML=list.length?list.map(t=>`<article class="unit-card"><span class="faction-stripe" style="background:${E.FACTIONS[t.faction].color}"></span><div><h4>${html(t.name)} <span class="point-small">· ${t.points} pts</span> ${tierTag(t)}</h4><p>${html(factionName(t))} · ${t.models} models · ${html(t.description)}</p><details class="unit-audit"><summary>Verification details</summary><ul>${profileNotes(t).map(note=>`<li>${html(note)}</li>`).join('')}</ul></details></div><button type="button" data-add="${html(t.id)}" ${state.musters[side].length>=14||points+t.points>state.pointsLimit||rosterProblems([...state.musters[side],t.id],side).length?'disabled':''} aria-label="Add ${html(t.name)} to ${side} force">+</button></article>`).join(''):
  state.tierFilter==='verified'?'<p class="muted">No units are fully Verified yet. Use Synced to play with imported profiles while we audit their weapons, points, abilities and restrictions.</p>':'<p class="muted">No matching units. Change the faction, verification filter or search terms.</p>';
  $('muster-list').innerHTML=['player','enemy'].map(s=>{
   const total=E.total(state.musters[s]),warning=total>state.pointsLimit?'overlimit':'';
   return `<div class="muster-group"><div class="muster-heading">${s==='player'?'Friendly force':'Opposing force'} <span class="muster-points ${warning}">${total} / ${state.pointsLimit} pts</span></div>
  ${state.musters[s].length?state.musters[s].map((id,i)=>{const t=E.BY_ID[id],base=E.BY_ID[t?.baseId]||t,stale=!!(t?.baseId&&t.sourceVersion!==base?.sourceVersion);
-  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${t?.special?.aircraft||t?.special?.immobile?'disabled':''} ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option>${t?.special?.deepStrike?`<option value="deepstrike" ${state.deployment[s][i]==='deepstrike'?'selected':''}>Deep Strike</option>`:''}${state.musters[s].flatMap((vehicleId,j)=>{
+  return `<div class="muster-config-wrap"><div class="muster-row"><span>${html(t?.name||'Unavailable datasheet')} <span class="point-small">${t?.points??'?'}${t?.estimated?'*':''} pts</span> ${t?tierTag(t):''}${t?.leader?' · with '+html(t.leader.name):''}${t?.formationLabel?' · '+html(t.formationLabel):''}${t?.enhancement?' · '+html(t.enhancement.name):''}${t?.leader?.enhancement?' · Leader: '+html(t.leader.enhancement.name):''}${stale?' <strong class="overlimit">STALE SOURCE</strong>':''}<label class="deployment-select">Start <select data-deploy-side="${s}" data-deploy-index="${i}"><option value="field" ${t?.special?.aircraft||t?.special?.immobile?'disabled':''} ${(state.deployment[s][i]||'field')==='field'?'selected':''}>On field</option><option value="reserve" ${state.deployment[s][i]==='reserve'?'selected':''}>In Reserves</option>${t?.special?.deepStrike?`<option value="deepstrike" ${state.deployment[s][i]==='deepstrike'?'selected':''}>Deep Strike</option>`:''}${state.musters[s].flatMap((vehicleId,j)=>{
  const carrier=E.BY_ID[vehicleId],space=j===i?null:E.passengerSpaces(t,carrier);
  return space!==null&&E.transportSpec(carrier)?[`<option value="embark:${j}" ${state.deployment[s][i]==='embark:'+j?'selected':''}>Embark: ${html(carrier.name)} #${j+1} (${space} spaces)</option>`]:[];
 }).join('')}</select></label></span><span class="muster-actions">${configurable(t)?`<button class="edit-unit-btn" data-edit-side="${s}" data-edit-index="${i}" aria-label="Configure ${html(t.name)}">${state.configEditor===s+':'+i?'Close':'Configure'}</button>`:''}<button data-remove-side="${s}" data-remove-index="${i}" aria-label="Remove ${html(t?.name||'unit')}">×</button></span></div>${state.configEditor===s+':'+i?showConfig(s,i):''}</div>`;
  }).join(''):'<p class="muted">No units selected.</p>'}</div>`;
- }).join('') + ['player','enemy'].flatMap(s=>E.musterProblems(state.musters[s]).map(err=>`<p class="muster-rule-warning" role="alert">${s==='player'?'Friendly':'Opposing'}: ${html(err)}</p>`)).join('');
+ }).join('') + ['player','enemy'].flatMap(s=>rosterProblems(state.musters[s],s).map(err=>`<p class="muster-rule-warning" role="alert">${s==='player'?'Friendly':'Opposing'}: ${html(err)}</p>`)).join('');
  let transportError=null;
+ try{E.normalizeArmyRules(state.armyRules,state.pointsLimit);E.normalizeCP(state.cpRules);}catch(e){transportError=e.message;}
  try{E.normalizeDeployment(state.deployment,state.musters);}catch(e){transportError=e.message;}
  if(transportError)$('muster-list').innerHTML+='<p class="muster-rule-warning" role="alert">Deployment: '+html(transportError)+'</p>';
- $('apply-musters').disabled=!!transportError||!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;})||E.musterProblems(state.musters[s]).length>0);
+ $('apply-musters').disabled=!!transportError||!state.musters.player.length||!state.musters.enemy.length||['player','enemy'].some(s=>E.total(state.musters[s])>state.pointsLimit||state.musters[s].some(id=>{const t=E.BY_ID[id];return t?.baseId&&t.sourceVersion!==E.BY_ID[t.baseId]?.sourceVersion;})||rosterProblems(state.musters[s],s).length>0);
 }
 function showSyncStatus(status,detail){
  const el=$('catalogue-sync-status'),desc=$('catalogue-sync-detail');
@@ -267,7 +293,7 @@ async function syncCatalogues(force=false){
 function addUnit(id){
  const arr=state.musters[state.editor],t=E.BY_ID[id];
  if(!t||arr.length>=14||E.total(arr)+t.points>state.pointsLimit)return;
- const errors=E.musterProblems([...arr,id]);
+ const errors=rosterProblems([...arr,id],state.editor);
  if(errors.length){showSyncStatus('Roster limit reached',errors[0]);return;}
  arr.push(id);state.deployment[state.editor].push(t.special?.aircraft||t.special?.immobile?'reserve':'field');renderBuilder();
 }
@@ -294,7 +320,7 @@ function importData(obj){
  const game=E.validateLoadedState(obj.game||obj);
  const settings=game.settings;
  if(!['player','enemy'].every(s=>Array.isArray(settings[s])&&settings[s].length>=1&&settings[s].length<=14&&settings[s].every(id=>!!E.BY_ID[id])))throw Error('This save references unsupported units.');
- state.game=game;state.musters={player:copy(settings.player),enemy:copy(settings.enemy)};state.deployment=E.normalizeDeployment(settings.deployment||obj.deployment,{player:state.musters.player,enemy:state.musters.enemy});state.placement=null;state.pointsLimit=[500,1000,2000,3000].includes(obj.pointsLimit)?obj.pointsLimit:Math.max(1000,Math.ceil(Math.max(E.total(state.musters.player),E.total(state.musters.enemy))/1000)*1000);
+ state.game=game;state.armyRules=E.normalizeArmyRules(settings.armyRules,settings.pointsLimit||2000);state.cpRules=E.normalizeCP(settings.cpRules);state.musters={player:copy(settings.player),enemy:copy(settings.enemy)};state.deployment=E.normalizeDeployment(settings.deployment||obj.deployment,{player:state.musters.player,enemy:state.musters.enemy});state.placement=null;state.pointsLimit=[500,1000,2000,3000].includes(obj.pointsLimit)?obj.pointsLimit:Math.max(1000,Math.ceil(Math.max(E.total(state.musters.player),E.total(state.musters.enemy))/1000)*1000);
  if(![500,1000,2000,3000].includes(state.pointsLimit))state.pointsLimit=3000;
  state.selected=null;state.lab=null;message('Battle restored.');renderBattle();tab('battle');
 }
@@ -324,6 +350,10 @@ function bind(){
  $('refresh-catalogues').addEventListener('click',()=>syncCatalogues(true));
  $('unit-catalogue').addEventListener('click',ev=>{const b=ev.target.closest('[data-add]');if(b)addUnit(b.dataset.add);});
  $('selected-unit').addEventListener('click',ev=>{
+  const coord=ev.target.closest('[data-coord-unit]');if(coord){const d=coord.dataset,r=E.coordinatedAttack(state.game,d.coordUnit,d.coordKind,d.coordPartner,d.coordTarget,d.coordChoice);message(r.ok?'Coordinated attacks resolved.':r.message,!r.ok);renderBattle();return;}
+  const retarget=ev.target.closest('[data-retarget-owner]');if(retarget){const r=E.retargetDirected(state.game,retarget.dataset.retargetOwner,retarget.dataset.retargetTarget);message(r.ok?'Directed Objective retargeted.':r.message,!r.ok);renderBattle();return;}
+  const strat=ev.target.closest('[data-strat-unit]');if(strat){const r=E.useStratagem(state.game,strat.dataset.stratUnit,strat.dataset.stratName,strat.dataset.stratTarget,strat.dataset.stratWeapon);message(r.ok?'Stratagem activated.':r.message,!r.ok);renderBattle();return;}
+  const vox=ev.target.closest('[data-vox-advance]');if(vox){const r=E.rerollAdvance(state.game,vox.dataset.voxAdvance);message(r.ok?'Advance re-rolled: '+r.roll+' inches.':r.message,!r.ok);renderBattle();return;}
   const ability=ev.target.closest('[data-ability-owner]');if(ability){const result=E.useAbility(state.game,ability.dataset.abilityOwner,ability.dataset.abilityName,ability.dataset.abilityTarget);message(result.ok?'Ability used.':result.message,!result.ok);renderBattle();return;}
   const advancing=ev.target.closest('[data-advance-unit]');if(advancing){
    const result=E.beginAdvance(state.game,advancing.dataset.advanceUnit);
@@ -338,6 +368,17 @@ function bind(){
   const remove=ev.target.closest('[data-remove-side]');if(remove){removeUnit(remove.dataset.removeSide,Number(remove.dataset.removeIndex));return;}
   const edit=ev.target.closest('[data-edit-side]');if(edit){const key=edit.dataset.editSide+':'+edit.dataset.editIndex;state.configEditor=state.configEditor===key?null:key;renderBuilder();}
  });
+ $('army-rules').addEventListener('change',ev=>{
+ const old=structuredClone(state.armyRules),oldCP={...state.cpRules};
+ const name=ev.target.dataset.detachment;
+ if(name)state.armyRules[state.editor]=ev.target.checked?[...state.armyRules[state.editor],name]:state.armyRules[state.editor].filter(n=>n!==name);
+ if(ev.target.id==='starting-cp')state.cpRules.initial=Number(ev.target.value);
+ if(ev.target.id==='turn-cp')state.cpRules.perTurn=Number(ev.target.value);
+ if(ev.target.id==='automatic-reactions')state.cpRules.reactions=ev.target.checked;
+ try{E.normalizeArmyRules(state.armyRules,state.pointsLimit);E.normalizeCP(state.cpRules);}
+ catch(e){state.armyRules=old;state.cpRules=oldCP;showSyncStatus('Army configuration rejected',e.message);}
+ renderBuilder();
+ });
  $('muster-list').addEventListener('change',ev=>{
  const dep=ev.target.closest('[data-deploy-side]');
  if(dep){
@@ -350,12 +391,12 @@ function bind(){
  const sel=ev.target.closest('[data-config-kind]');
  if(sel)updateConfiguration(sel.dataset.configSide,Number(sel.dataset.configIndex),sel.dataset.configKind,sel.value,sel.dataset.configSlot);
 });
- $('restore-musters').addEventListener('click',()=>{state.musters={player:copy(initialPlayer),enemy:copy(initialEnemy)};state.deployment={player:initialPlayer.map(()=>'field'),enemy:initialEnemy.map(()=>'field')};state.pointsLimit=1000;state.configEditor=null;renderBuilder();});
+ $('restore-musters').addEventListener('click',()=>{state.musters={player:copy(initialPlayer),enemy:copy(initialEnemy)};state.deployment={player:initialPlayer.map(()=>'field'),enemy:initialEnemy.map(()=>'field')};state.pointsLimit=1000;state.armyRules={player:[],enemy:[]};state.cpRules={initial:0,perTurn:0,reactions:false};state.configEditor=null;renderBuilder();});
  $('apply-musters').addEventListener('click',resetBattle);
  $('run-lab').addEventListener('click',()=>{
   if(!state.musters.player.length||!state.musters.enemy.length){$('lab-results').textContent='Build both armies first.';return;}
   const seed=Number($('lab-seed').value)||20261110;
-  state.lab=E.battleLab(state.musters.player,state.musters.enemy,10,seed,state.deployment);renderLab();
+  try{state.lab=E.battleLab(state.musters.player,state.musters.enemy,10,seed,state.deployment,armyOptions());renderLab();}catch(e){$('lab-results').textContent=e.message;}
  });
  $('lab-results').addEventListener('click',ev=>{if(ev.target.closest('#export-lab')&&state.lab)download('gaul-campaign-battle-lab.json',JSON.stringify({musters:state.musters,configurations:configuredSpecs(),deployment:state.deployment,results:state.lab},null,2),'application/json');});
 }

@@ -1,3 +1,5 @@
+> Historical release report. See [Alpha 0.11 quality report](QUALITY_REPORT_V11.md) for the current release.
+
 # Alpha 0.10.2 — quality report
 
 This report covers software behavior and source import integrity. It does **not** certify full tabletop rules fidelity. No unit has been promoted to Verified.

@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v13';
-const CACHE_VERSION=13;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v14';
+const CACHE_VERSION=14;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.10.2';
+const RULESET_VERSION='alpha-0.11.0';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -325,6 +325,20 @@ function mergeWeapons(weapons){
 }
 // Configures a linked unit from source formations and reachable equipment branches.
 // Other New Recruit selection graphs are not silently guessed or treated as verified.
+// Enhancement eligibility follows the actual per-unit entry links. A missing link
+// is not replaced with a name-based guess, and each paid recipient has one slot.
+function enhancementOptions(doc,node){
+ const all=descendants(doc.documentElement,'selectionEntry');
+ const byId=new Map(all.map(e=>[value(e,'id'),e]));
+ const detachments=new Map(all.filter(e=>path(e,'costs','cost').some(c=>value(c,'name')==='DP'&&int(value(c,'value'))>0)).map(e=>[value(e,'id'),value(e,'name')]));
+ return path(node,'selectionEntryGroups','selectionEntryGroup').filter(g=>/Enhancements & Unit Upgrades/.test(value(g,'name'))).flatMap(g=>path(g,'entryLinks','entryLink')).map(link=>{
+  const entry=byId.get(value(link,'targetId'));if(!entry)return null;
+  const condition=descendants(link,'condition').find(c=>detachments.has(value(c,'childId')));
+  const profile=path(entry,'profiles','profile')[0];
+  const max=path(entry,'constraints','constraint').find(c=>value(c,'type')==='max'&&value(c,'scope')==='roster');
+  return {id:value(entry,'id'),name:value(entry,'name'),points:pointsFrom(entry),maxCopies:int(value(max,'value')),detachment:detachments.get(value(condition,'childId')),description:field(profile,'Description')};
+ }).filter(e=>e&&Number.isFinite(e.points)&&e.detachment);
+}
 function configureUnit(base,config={},leaders=[]){
  if(!base||base.source!=='linked'||base.faction!=='IW'||!Array.isArray(base.formationConfigs)||!base.formationConfigs.length)throw Error('This datasheet does not support formation editing yet.');
  const form=base.formationConfigs.find(f=>f.id===(config.formationId||base.defaultFormationId));
@@ -353,9 +367,18 @@ function configureUnit(base,config={},leaders=[]){
  if(leader)weapons.push(...(leader.loadout||[]).map(w=>({...w,count:Math.min(1,w.count),isLeader:true})));
  if(base.special?.mandatoryChaplain&&base.leader)weapons.push(...(base.leader.loadout||[]).map(w=>({...w,count:1,isLeader:true}))); 
  const sortedGear=Object.fromEntries(Object.entries(picks).sort((a,b)=>a[0].localeCompare(b[0])));
- const key=JSON.stringify([base.id,base.sourceVersion,form.id,sortedGear,leader?.id||'']);
+ const selectedEnhancement=config.enhancementId?(base.enhancementOptions||[]).find(e=>e.id===config.enhancementId):null;
+ if(config.enhancementId&&!selectedEnhancement)throw Error('This unit cannot buy that Enhancement.');
+ const leaderBase=leader||(base.special?.mandatoryChaplain?leaders.find(l=>l.id===base.leader?.id):null);
+ const leaderEnhancement=config.leaderEnhancementId?(leaderBase?.enhancementOptions||[]).find(e=>e.id===config.leaderEnhancementId):null;
+ if(config.leaderEnhancementId&&!leaderEnhancement)throw Error('This Leader cannot buy that Character Enhancement.');
+ const selectedWeapon=selectedEnhancement?.name==='Dismantler’s Charge'?config.enhancementWeapon||null:null;
+ if(selectedEnhancement?.name==='Dismantler’s Charge'&&!weapons.some(w=>w.mode==='melee'&&!w.isLeader&&w.sourceProfileId===selectedWeapon))throw Error('Choose the model’s melee weapon for Dismantler’s Charge.');
+ const identity=[base.id,base.sourceVersion,form.id,sortedGear,leader?.id||''];
+ if(selectedEnhancement||leaderEnhancement)identity.push(selectedEnhancement?.id||'',leaderEnhancement?.id||'',selectedWeapon);
+ const key=JSON.stringify(identity);
  const variant={...base,equipmentSlots:resolved?.slots||form.slots,id:'cfg-'+base.id.slice(3)+'-'+hash(key),baseId:base.id,
-  selectedFormation:form.id,selectedGear:sortedGear,leaderId:leader?.id||null,
+  selectedFormation:form.id,selectedGear:sortedGear,leaderId:leader?.id||null,enhancement:selectedEnhancement,leaderEnhancement,enhancementWeapon:selectedWeapon,
   formationLabel:form.label,bodyguardModels:form.models,models:form.models+((leader||base.special?.mandatoryChaplain&&base.leader)?1:0),
   points:Math.max(1,Math.round((base.rootPoints||0)+(Number.isFinite(form.points)?form.points:base.points)+extra+(leader?.points||0))),
   loadout:mergeWeapons(weapons),leader:leader?{id:leader.id,name:leader.name,wp:leader.wp,ld:leader.ld,t:leader.t,save:leader.save,oc:leader.oc,points:leader.points,special:leader.special,keywords:leader.keywords||[],isLeader:true,abilities:leader.abilities||[]}:base.special?.mandatoryChaplain?base.leader:null,
@@ -364,6 +387,14 @@ function configureUnit(base,config={},leaders=[]){
  // Alternative formations may encode parent costs only: preserve published starting points.
  if(!Number.isFinite(form.points)||form.points<=0)variant.points=Math.max(1,base.points+extra+(leader?.points||0));
  if(resolved&&resolved.points>0)variant.points=Math.round(resolved.points+(leader?.points||0));
+ variant.points+=(selectedEnhancement?.points||0)+(leaderEnhancement?.points||0);
+ if(variant.leader)variant.leader={...variant.leader,enhancement:leaderEnhancement};
+ if(selectedEnhancement?.name==='Dismantler’s Charge'){
+  const weapon=variant.loadout.find(w=>w.mode==='melee'&&!w.isLeader&&w.sourceProfileId===selectedWeapon);
+  // One designated model and one weapon, not the whole squad's profile.
+  const boosted={...weapon,count:1,s:weapon.s+1,designated:true};weapon.count--;
+  variant.loadout=variant.loadout.filter(w=>w.count>0);variant.loadout.push(boosted);
+ }
  const selectedLabels=resolved?.slots.map(s=>s.choices.find(c=>c.id===s.selectedId)?.label||'').join(' ')||'';
  if(/Low-Altitude Assault Skimmer/i.test(selectedLabels)){variant.special.aircraft=false;variant.move=7;variant.flightMode='skimmer';}
  else if(/Aircraft Interdictor/i.test(selectedLabels)){variant.special.aircraft=true;variant.flightMode='aircraft';}
@@ -377,7 +408,7 @@ function configureUnit(base,config={},leaders=[]){
 function fingerprint(unit){
  const snapshot={id:unit.id,sourceId:unit.sourceId,faction:unit.faction,name:unit.name,points:unit.points,
   estimated:unit.estimated,models:unit.models,wp:unit.wp,ld:unit.ld,t:unit.t,save:unit.save,move:unit.move,oc:unit.oc,
-  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,leader:unit.leader,abilities:unit.abilities,category:unit.category,audit:unit.audit,auditBlockers:unit.auditBlockers};
+  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,enhancementOptions:unit.enhancementOptions,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,leader:unit.leader,abilities:unit.abilities,category:unit.category,audit:unit.audit,auditBlockers:unit.auditBlockers};
  return hash(JSON.stringify(snapshot));
 }
 function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
@@ -463,7 +494,7 @@ function parseCatalogue(xml,faction,sourceVersion=''){
   const declaredModels=sourceComposition||descendants(node,'selectionEntry').filter(e=>value(e,'type')==='model').some(e=>minModels(e)>0)||minModels(node)>1;
   const unit={id,sourceId:value(node,'id'),sourceVersion,faction,name,points:p.points,models,abilities:unitAbilities(node),wp:stats.wp,ld:stats.ld,t:stats.t,save:stats.save,move:stats.move,oc:stats.oc,
    isLeader,leaderTargets:isLeader?leaderTargets(node):[],rosterMax:rosterMaximum(node),wargearLimits:faction==='IW'?wargearLimits(node):[],rootPoints:Number.isFinite(pointsFrom(node))?pointsFrom(node):0,
-   defaultFormationId:form?.selected?.id||(configs.length?'default':null),formationConfigs:configs,
+   defaultFormationId:form?.selected?.id||(configs.length?'default':null),formationConfigs:configs,enhancementOptions:faction==='IW'?enhancementOptions(doc,node):[],
    ranged:(()=>{const found=linked.weapons.filter(w=>w.mode==='ranged');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.ranged;})(),
    melee:(()=>{const found=linked.weapons.filter(w=>w.mode==='melee');return found.length?{...found[0],range:Math.max(...found.map(w=>w.range))}:weapons.melee;})(),
    loadout:linked.weapons,sizeOptions:form?.choices.map(({id,label,models,points})=>({id,label,models,points}))||[],

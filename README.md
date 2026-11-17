@@ -1,8 +1,8 @@
-# Gaul Campaign Simulator — Alpha 0.10.2
+# Gaul Campaign Simulator — Alpha 0.11.0
 
 An unofficial tactical playtest for Gaul Campaign: Renegades.
 
-**[Play the simulator](https://varroth.github.io/Gaul-Campaign-Simulator/)** · [Quality report and remaining work](docs/QUALITY_REPORT_V10.md) · [Automated checks](https://github.com/Varroth/Gaul-Campaign-Simulator/actions/workflows/simulator-tests.yml)
+**[Play the simulator](https://varroth.github.io/Gaul-Campaign-Simulator/)** · [Quality report and remaining work](docs/QUALITY_REPORT_V11.md) · [Automated checks](https://github.com/Varroth/Gaul-Campaign-Simulator/actions/workflows/simulator-tests.yml)
 
 ## Catalogue connection
 
@@ -11,6 +11,16 @@ The Army Builder reads the public [New Recruit repository](https://github.com/Va
 The current source contains **326 imported profiles**: 96 Infernal Warriors (74 units and 22 characters), 169 Frozen Cogs, and 61 Abandoned Dead. The separate Silver Tempests catalogue has no published root units, so its eight built-in simulator profiles remain available as estimates.
 
 A source refresh does not change the profiles of a battle already underway. Saved linked battles pin source revisions and reject incompatible changed catalogues rather than silently changing the army.
+
+## Alpha 0.11.0 changes
+
+Army Configuration now offers all four Infernal Warriors detachments with the published 2/3 DP budgets. All sixteen paid upgrades follow the catalogue's actual recipient links, with one choice per unit or eligible generic Chaplain, distinct-name caps, copy limits, and exact extra points. The source audit exercises all **119 eligible recipient/upgrade mappings**.
+
+All four core detachment doctrines now have engine paths: charge re-rolls for Breach and Ruin/Crimson Onslaught, and joint declarations for War Hounds’ Legacy/Iron Reavers. Twenty-three of the twenty-four stratagems have handlers: sixteen active actions and seven optional automatic defensive reactions. **No Quarter Asked remains unavailable because its “nearby” range is undefined.** Coverage is partial where timing, shared doctrines or model geometry are abstracted.
+
+CP is a scenario setting, not Detachment Points. Starting CP and income default to zero; configure the agreed values in Army Configuration. Income applies at each side's own turn start, including turn one. Defensive reactions are opt-in for both sides and spend CP at their trigger. The training engine limits each named stratagem to one use per phase. No claim is made that these defaults define an official edition's CP economy.
+
+New regression cases cover points, eligibility, timing, CP, use limits, re-roll stacking, coordinated attacks, protective reactions, saved rules, and deterministic Battle Lab runs. Older unenhanced configured saves retain their original IDs. The quality pass also corrected duplicate automatic turn-start processing and applies the daemon cap against the agreed battle limit when one is provided.
 
 ## Alpha 0.10.2 changes
 
@@ -25,7 +35,7 @@ Named-rule tests now cover Independent Forge, Boarding Priority, Forward Observe
 - Valid saves with multiple offboard units now load correctly. Duplicate or unpurchased unit identities are rejected. Catalogue caching fits a standard browser quota and reports storage failures.
 - Regression checks now include every actual imported profile and reachable Infernal formation/equipment branch, plus real Chromium checks for desktop, mobile, save/load, complete battles and offline startup.
 
-These changes extend an abstract grid simulation. **Full tabletop rules parity is not complete.** Exact mission-pack reserves, aircraft flight paths, all detachment/stratagem interactions, conditional New Recruit modifiers, and model-by-model allocation still need work. The [quality report](docs/QUALITY_REPORT_V10.md) distinguishes executed software checks from unresolved rules.
+These changes extend an abstract grid simulation. **Full tabletop rules parity is not complete.** Exact mission-pack reserves, aircraft flight paths, all detachment/stratagem interactions, conditional New Recruit modifiers, and model-by-model allocation still need work. The [quality report](docs/QUALITY_REPORT_V11.md) distinguishes executed software checks from unresolved rules.
 
 ## Confidence labels
 
