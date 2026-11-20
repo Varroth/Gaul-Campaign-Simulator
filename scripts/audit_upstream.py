@@ -43,6 +43,8 @@ def main():
         units=candidates(root)
         sample=[(u.get('id'),u.get('name')) for u in list(units.values())[:8]]
         print(f'{name}: {len(units)} selectable root units; manifest {wanted}; revision {root.get("revision")}; sample {sample}')
+        if len(units)!=wanted:
+            print('NOTICE: source manifest inventory differs from current XML; live Git tree sync uses the actual catalogue revision')
         if wanted and len(units)<wanted*.80:
             print('ERROR: root parser would expose fewer than 80% of declared units')
             failures+=1

@@ -8,7 +8,7 @@ An unofficial tactical playtest for Gaul Campaign: Renegades.
 
 The Army Builder reads the public [New Recruit repository](https://github.com/Varroth/Gaul-Campaign-Renegades) without changing it. It checks on startup, when an inactive tab is revisited, or when **Sync latest units** is selected. Source checksums are verified before importing a revision. Unchanged files are reused from the browser cache; previously loaded catalogues remain available when the source is offline.
 
-The current source contains **326 imported profiles**: 96 Infernal Warriors (74 units and 22 characters), 169 Frozen Cogs, and 61 Abandoned Dead. The separate Silver Tempests catalogue has no published root units, so its eight built-in simulator profiles remain available as estimates.
+The current source contains **353 imported profiles**: 96 Infernal Warriors (74 units and 22 characters), 169 Frozen Cogs, 61 Abandoned Dead, and 27 Silver Tempests. Silver Tempests revision 13 now replaces the eight built-in estimates with published source units. The simulator detects these additions through the existing read-only sync.
 
 A source refresh does not change the profiles of a battle already underway. Saved linked battles pin source revisions and reject incompatible changed catalogues rather than silently changing the army.
 

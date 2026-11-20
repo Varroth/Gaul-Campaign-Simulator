@@ -4,7 +4,7 @@ This release extends Infernal Warriors army configuration and combat rules. It r
 
 ## Source and scope
 
-Source: read-only `Varroth/Gaul-Campaign-Renegades` commit `22d3ef1d06ca755118e75e0fc02648fca6b1c183`. The source repository has not been modified. Profile counts remain IW 96 (74 units and 22 characters), FC 169, AD 61, ST 0. Eight local Silver Tempests estimates remain available. Full hashes and revisions are recorded in the CI artifact and [previous source table](QUALITY_REPORT_V10.md#source-snapshot).
+Source: read-only `Varroth/Gaul-Campaign-Renegades` commit `3a37816f85925b6868d673f1f491fa4962efeb04`. The source repository has not been modified. Profile counts are IW 96 (74 units and 22 characters), FC 169, AD 61, ST 27: **353 total**. Silver Tempests revision 13, blob `2e1223f5c6b7bb94bb75dd9dece89bf666137246`, now supplies published units in place of the earlier eight local estimates. Full hashes and revisions are recorded in the CI artifact and [previous source table](QUALITY_REPORT_V10.md#source-snapshot).
 
 ## Implemented in this release
 
@@ -27,7 +27,7 @@ Source: read-only `Varroth/Gaul-Campaign-Renegades` commit `22d3ef1d06ca755118e7
 
 All **257 automated regression tests** pass, covering prior functionality plus the new army rules. CI also runs six source XML audits and four Chromium browser scripts. The catalogue execution audit checks:
 
-- 326 imported profiles and 652 ranged/melee execution states;
+- 353 imported profiles and 706 ranged/melee execution states;
 - 284 formations and 2,991 individual reachable equipment choices, not every combination;
 - all sixteen upgrade names across 119 eligible recipient/upgrade mappings, with exact extra points;
 - named-Hero rejection and a separately paid attached generic Chaplain upgrade;
@@ -48,6 +48,6 @@ The `simulator-quality-report` CI artifact includes `catalogue-qc.json`, `browse
 | Full roster constraints | Conditional modifiers, multiple-selection menus, every per-five/model-level quota, and cross-faction attachments still need a complete New Recruit constraint evaluator. |
 | Transport subrules | Breach and Ruin requisition discounts, insertion exceptions and mission-dependent pregame repositioning need further source-rule implementation. |
 | Exact battle fidelity | Individual models/bases, true visibility, aircraft flight, mixed-weapon casualties, every mortal-wound interaction and simultaneous effect ordering remain approximations. Army doctrines/upgrades/stratagems are therefore partial rule coverage. |
-| Other factions | Import and combat execution are tested, but full FC/AD/ST rules are not implemented. ST cannot sync units absent from the published source. |
+| Other factions | Import and combat execution are tested, but full FC/AD/ST rules are not implemented. Silver Tempests now imports all 27 published revision-13 profiles; its complete faction mechanics still need implementation. |
 
 This is a tested development release. The full original rules checklist is **not yet complete**. Source gaps and remaining implementation are listed separately above so neither is mistaken for verified behavior.

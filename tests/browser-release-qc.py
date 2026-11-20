@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import threading
+import xml.etree.ElementTree as ET
 from playwright.sync_api import sync_playwright, expect
 
 root = Path(__file__).resolve().parents[1]
@@ -23,6 +24,16 @@ files = ['Infernal_Warriors.cat', 'Frozen_Cogs.cat', 'Abandoned_Dead.cat', 'Silv
 xml = {name: (source / name).read_bytes() for name in files}
 shas = {name: hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() for name, data in xml.items()}
 tree = {'tree': [{'path': name, 'type': 'blob', 'sha': sha} for name, sha in shas.items()]}
+# Independent XML root inventory; source additions should expand the UI rather
+# than fail a stale fixed total. Other parser/gear checks remain separate.
+expected_counts = {}
+for faction, filename in zip(['IW', 'FC', 'AD', 'ST'], files):
+    catalogue = ET.fromstring(xml[filename])
+    ns = {'b': catalogue.tag.split('}')[0][1:]}
+    expected_counts[faction] = sum(entry.get('type') in ['unit', 'model'] and entry.get('hidden') != 'true'
+                                  for entry in catalogue.findall('./b:selectionEntries/b:selectionEntry', ns))
+expected_total = sum(expected_counts.values())
+
 server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(root)))
 threading.Thread(target=server.serve_forever, daemon=True).start()
 url = f'http://127.0.0.1:{server.server_port}/'
@@ -57,12 +68,14 @@ with sync_playwright() as p:
     page.goto(url)
     page.locator('[data-tab="builder"]').click()
     expect(page.locator('#catalogue-sync-status')).to_contain_text('connection current', timeout=120000)
-    expect(page.locator('#verification-counts')).to_contain_text('326 Synced')
+    expect(page.locator('#verification-counts')).to_contain_text(f'{expected_total} Synced')
     assert sorted(reads) == sorted(files), reads
     cache_bytes = page.evaluate('localStorage.getItem(GaulCatalogue.CACHE_KEY).length*2')
     assert cache_bytes < 5 * 1024 * 1024, cache_bytes
     assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v13')") is None
-    for faction, count in [('IW', 96), ('FC', 169), ('AD', 61), ('ST', 8)]:
+    for faction, count in expected_counts.items():
+        if faction == 'ST' and count == 0:
+            count = 8  # explicitly labelled local estimates only when no source units exist
         page.locator('#faction-filter').select_option(faction)
         assert page.locator('[data-add]').count() == count, (faction, page.locator('#catalogue-count').inner_text())
     for faction, name, models, points in [('FC', 'Company Captain', 1, 90), ('AD', 'Blackout Breachers', 5, 110)]:
@@ -176,7 +189,7 @@ with sync_playwright() as p:
     page.reload()
     page.locator('[data-tab="builder"]').click()
     expect(page.locator('#catalogue-sync-status')).to_contain_text('source check incomplete')
-    expect(page.locator('#verification-counts')).to_contain_text('326 Synced')
+    expect(page.locator('#verification-counts')).to_contain_text(f'{expected_total} Synced')
     # Mobile layout and controls, backed by the same actual cached catalogues.
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Mobile page overflow'
@@ -189,7 +202,7 @@ with sync_playwright() as p:
     expect(page.locator('#battle-feedback')).to_have_text('Battle restored.')
     page.screenshot(path=str(out / 'mobile-battle.png'), full_page=True)
     assert not errors, errors
-    report = {'passed': True, 'browser': browser.version, 'imported': 326, 'cacheBytes': cache_bytes,
+    report = {'passed': True, 'browser': browser.version, 'imported': expected_total, 'cacheBytes': cache_bytes,
               'sourceDownloads': len(reads), 'javascriptErrors': errors,
               'checks': ['fresh XML sync and checksums', 'all faction lists', 'paid upgrade and DP selection', 'CP stratagem and Advance bonuses', 'upgraded roster save/load', 'optional vehicle equipment',
                          'legacy cache upgrade within browser quota', 'selected model costs and personnel branches',
