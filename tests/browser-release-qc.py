@@ -41,7 +41,7 @@ url = f'http://127.0.0.1:{server.server_port}/'
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, executable_path=os.environ.get('BROWSER_EXECUTABLE') or shutil.which('chromium'), args=['--no-sandbox'])
     context = browser.new_context(viewport={'width': 1440, 'height': 1050}, reduced_motion='reduce')
-    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v13', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
+    context.add_init_script("if (!localStorage.getItem('migration-test-done')) { localStorage.setItem('gaul-campaign-catalogue-cache-v14', 'x'.repeat(2100000)); localStorage.setItem('migration-test-done', '1'); }")
     errors = []
     reads = []
     mode = {'offline': False}
@@ -72,7 +72,7 @@ with sync_playwright() as p:
     assert sorted(reads) == sorted(files), reads
     cache_bytes = page.evaluate('localStorage.getItem(GaulCatalogue.CACHE_KEY).length*2')
     assert cache_bytes < 5 * 1024 * 1024, cache_bytes
-    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v13')") is None
+    assert page.evaluate("localStorage.getItem('gaul-campaign-catalogue-cache-v14')") is None
     for faction, count in expected_counts.items():
         if faction == 'ST' and count == 0:
             count = 8  # explicitly labelled local estimates only when no source units exist
@@ -83,6 +83,12 @@ with sync_playwright() as p:
         page.locator('#unit-search').fill(name)
         expect(page.locator('#unit-catalogue')).to_contain_text(f'{points} pts')
         expect(page.locator('#unit-catalogue')).to_contain_text(f'{models} models')
+    if expected_counts['ST']:
+        page.locator('#faction-filter').select_option('ST')
+        for name, points in [('Tide Lieutenant', 60), ('Oathkeeper', 60), ('Apothecary', 55), ('Forgewarden', 65)]:
+            page.locator('#unit-search').fill(name)
+            expect(page.locator('#unit-catalogue')).to_contain_text('1 models')
+            expect(page.locator('#unit-catalogue')).to_contain_text(f'{points} pts')
     page.locator('#faction-filter').select_option('IW')
     while page.locator('[data-remove-side="player"]').count():
         page.locator('[data-remove-side="player"]').first.click()
@@ -204,7 +210,7 @@ with sync_playwright() as p:
     assert not errors, errors
     report = {'passed': True, 'browser': browser.version, 'imported': expected_total, 'cacheBytes': cache_bytes,
               'sourceDownloads': len(reads), 'javascriptErrors': errors,
-              'checks': ['fresh XML sync and checksums', 'all faction lists', 'paid upgrade and DP selection', 'CP stratagem and Advance bonuses', 'upgraded roster save/load', 'optional vehicle equipment',
+              'checks': ['fresh XML sync and checksums', 'all faction lists', 'source character counts and costs', 'paid upgrade and DP selection', 'CP stratagem and Advance bonuses', 'upgraded roster save/load', 'optional vehicle equipment',
                          'legacy cache upgrade within browser quota', 'selected model costs and personnel branches',
                          'Deep Strike with two purchased passenger squads', 'reinforcement timing',
                          'arrival disembarkation', 'save/load and export/import', 'complete battle',

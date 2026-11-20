@@ -1,4 +1,4 @@
-# Alpha 0.11.0 — quality report
+# Alpha 0.11.1 — quality report
 
 This release extends Infernal Warriors army configuration and combat rules. It remains an abstract training simulator, **not complete tabletop rules parity**. No unit is marked Verified.
 
@@ -7,6 +7,8 @@ This release extends Infernal Warriors army configuration and combat rules. It r
 Source: read-only `Varroth/Gaul-Campaign-Renegades` commit `3a37816f85925b6868d673f1f491fa4962efeb04`. The source repository has not been modified. Profile counts are IW 96 (74 units and 22 characters), FC 169, AD 61, ST 27: **353 total**. Silver Tempests revision 13, blob `2e1223f5c6b7bb94bb75dd9dece89bf666137246`, now supplies published units in place of the earlier eight local estimates. Full hashes and revisions are recorded in the CI artifact and [previous source table](QUALITY_REPORT_V10.md#source-snapshot).
 
 ## Implemented in this release
+
+The live publication check caught a new-source import issue: Tide Lieutenant, Oathkeeper, Apothecary and Forgewarden had abbreviated `char` categories and were inferred as five models. Alpha 0.11.1 reads root Keywords profiles, imports these as single characters at their published cost, preserves explicitly declared multi-model formations, and invalidates the old catalogue cache. Regression and browser checks now cover these four profiles.
 
 | Area | Behavior and limits |
 | --- | --- |
@@ -25,7 +27,7 @@ Source: read-only `Varroth/Gaul-Campaign-Renegades` commit `3a37816f85925b6868d6
 
 ## Checks and evidence
 
-All **257 automated regression tests** pass, covering prior functionality plus the new army rules. CI also runs six source XML audits and four Chromium browser scripts. The catalogue execution audit checks:
+All **260 automated regression tests** pass, covering prior functionality plus the new army rules. CI also runs six source XML audits and four Chromium browser scripts. The catalogue execution audit checks:
 
 - 353 imported profiles and 706 ranged/melee execution states;
 - 284 formations and 2,991 individual reachable equipment choices, not every combination;

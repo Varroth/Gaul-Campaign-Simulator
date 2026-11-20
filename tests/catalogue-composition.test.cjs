@@ -17,3 +17,19 @@ test('optional personnel group remains empty even when its child has a minimum',
  const t=parse(`<selectionEntries>${model('core',20,1)}</selectionEntries><selectionEntryGroups><selectionEntryGroup id="optional" name="Optional specialist"><constraints><constraint type="min" field="selections" value="0"/><constraint type="max" field="selections" value="1"/></constraints><selectionEntries>${model('specialist',80,1)}</selectionEntries></selectionEntryGroup></selectionEntryGroups>`);
  assert.equal(t.models,1);assert.equal(t.points,20);
 });
+const keywords=text=>`<profiles><profile name="Keywords" typeName="Ability"><characteristics><characteristic name="Description">${text}</characteristic></characteristics></profile></profiles>`;
+test('root keyword profiles identify single characters with abbreviated categories',()=>{
+ const t=parse(`<categoryLinks><categoryLink name="char"/></categoryLinks>${keywords('SILVER TEMPESTS, INFANTRY, CHARACTER, PSYKER')}<costs><cost name="pts" value="60"/></costs>`);
+ assert.equal(t.models,1);assert.equal(t.points,60);
+ assert.ok(t.keywords.includes('CHARACTER'));assert.ok(t.keywords.includes('PSYKER'));
+ assert.notEqual(C.fingerprint(t),C.fingerprint({...t,keywords:['char']}),'keyword changes invalidate combat review fingerprints');
+});
+test('declared multiple models take precedence over a unit character keyword',()=>{
+ const t=parse(`${keywords('CHARACTER, INFANTRY')}<selectionEntries>${model('twins',30,2)}</selectionEntries>`);
+ assert.equal(t.models,2);assert.equal(t.points,60);
+});
+test('child keyword profiles do not classify the parent squad as a character',()=>{
+ const t=parse(`<categoryLinks><categoryLink name="INFANTRY"/></categoryLinks>${keywords('INFANTRY, PSYKER')}<selectionEntries><selectionEntry id="optional" name="Optional bearer" type="upgrade">${keywords('CHARACTER')}</selectionEntry></selectionEntries>`);
+ assert.equal(t.models,5);assert.ok(!t.keywords.includes('CHARACTER'));
+ assert.deepEqual(t.keywords,['INFANTRY','PSYKER']);
+});

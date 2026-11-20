@@ -1,4 +1,4 @@
-# Gaul Campaign Simulator — Alpha 0.11.0
+# Gaul Campaign Simulator — Alpha 0.11.1
 
 An unofficial tactical playtest for Gaul Campaign: Renegades.
 
@@ -12,7 +12,9 @@ The current source contains **353 imported profiles**: 96 Infernal Warriors (74 
 
 A source refresh does not change the profiles of a battle already underway. Saved linked battles pin source revisions and reject incompatible changed catalogues rather than silently changing the army.
 
-## Alpha 0.11.0 changes
+## Alpha 0.11.1 changes
+
+Live verification caught four Silver Tempests characters being interpreted as five-model squads. The importer now reads root Keywords profiles as well as category links, preserves explicit squad sizes, and refreshes older cached imports. Published character costs are unchanged.
 
 Army Configuration now offers all four Infernal Warriors detachments with the published 2/3 DP budgets. All sixteen paid upgrades follow the catalogue's actual recipient links, with one choice per unit or eligible generic Chaplain, distinct-name caps, copy limits, and exact extra points. The source audit exercises all **119 eligible recipient/upgrade mappings**.
 

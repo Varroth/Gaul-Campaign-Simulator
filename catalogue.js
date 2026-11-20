@@ -9,8 +9,8 @@
 const REPOSITORY='Varroth/Gaul-Campaign-Renegades';
 const BRANCH='main';
 const FILES={IW:'Infernal_Warriors.cat',FC:'Frozen_Cogs.cat',AD:'Abandoned_Dead.cat',ST:'Silver_Tempest.cat'};
-const CACHE_KEY='gaul-campaign-catalogue-cache-v14';
-const CACHE_VERSION=14;
+const CACHE_KEY='gaul-campaign-catalogue-cache-v15';
+const CACHE_VERSION=15;
 const RAW=`https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/`;
 const TREE=`https://api.github.com/repos/${REPOSITORY}/git/trees/${BRANCH}`;
 const MANIFEST=RAW+'catalogue-manifest.json';
@@ -20,7 +20,7 @@ const MAX_TEMPLATES=600;
 // mapping. No imported unit is automatically considered verified. Entries are added
 // to this ledger only after full profile, loadout, rule, composition and engine tests.
 // The initial ledger is intentionally empty; see docs/VERIFICATION_POLICY.md.
-const RULESET_VERSION='alpha-0.11.0';
+const RULESET_VERSION='alpha-0.11.1';
 const VERIFIED_LEDGER=Object.freeze({});
 const REVIEW_CHECKS=['stats','points','weapons','abilities','composition','engine'];
 const value=(el,attr)=>el?.getAttribute?.(attr)||'';
@@ -305,6 +305,18 @@ function getWeapons(unit,stats){
   rangedFromSource:!!ranged,meleeFromSource:!!melee};
 }
 function categoryFor(unit){const links=path(unit,'categoryLinks','categoryLink');return links.map(x=>value(x,'name')).filter(Boolean).slice(0,3).join(', ');}
+function keywordsFor(unit){
+ // Some catalogues use abbreviated category labels and declare their actual
+ // keywords in a root Ability profile. Child models/equipment must not lend
+ // their keywords to the entire unit.
+ const declared=path(unit,'profiles','profile').filter(p=>/^(?:Faction )?Keywords$/i.test(value(p,'name'))).flatMap(p=>field(p,'Description').split(/[,;]/));
+ const result=[],seen=new Set();
+ for(const text of [...path(unit,'categoryLinks','categoryLink').map(c=>value(c,'name')),...declared]){
+  const key=text.trim();if(!key||seen.has(key.toUpperCase()))continue;
+  seen.add(key.toUpperCase());result.push(key);
+ }
+ return result;
+}
 function leaderTargets(unit){
  const ability=descendants(unit,'profile').find(p=>/Leader eligibility \/ attachments/i.test(value(p,'name')));
  if(!ability)return [];
@@ -408,7 +420,7 @@ function configureUnit(base,config={},leaders=[]){
 function fingerprint(unit){
  const snapshot={id:unit.id,sourceId:unit.sourceId,faction:unit.faction,name:unit.name,points:unit.points,
   estimated:unit.estimated,models:unit.models,wp:unit.wp,ld:unit.ld,t:unit.t,save:unit.save,move:unit.move,oc:unit.oc,
-  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,enhancementOptions:unit.enhancementOptions,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,leader:unit.leader,abilities:unit.abilities,category:unit.category,audit:unit.audit,auditBlockers:unit.auditBlockers};
+  ranged:unit.ranged,melee:unit.melee,loadout:unit.loadout,sizeOptions:unit.sizeOptions,equipmentMenus:unit.equipmentMenus,formationConfigs:unit.formationConfigs,enhancementOptions:unit.enhancementOptions,leaderTargets:unit.leaderTargets,rosterMax:unit.rosterMax,wargearLimits:unit.wargearLimits,special:unit.special,leader:unit.leader,abilities:unit.abilities,category:unit.category,keywords:unit.keywords,audit:unit.audit,auditBlockers:unit.auditBlockers};
  return hash(JSON.stringify(snapshot));
 }
 function statusFor(unit,sourceVersion=unit?.sourceVersion||'',ledger=VERIFIED_LEDGER){
@@ -477,14 +489,14 @@ function parseCatalogue(xml,faction,sourceVersion=''){
     return {id:c.id,label:c.label,models:c.models,points:c.points,loadout:one.weapons,
        slots:one.slots.filter(slot=>!!slot.id),equipmentTree:one.tree,equipmentPoints:one.points};
    }).filter(c=>Number.isInteger(c.models)&&c.models>=1&&c.models<=20).slice(0,22):[];
-  const cat=categoryFor(node),stats=getStats(node,name,cat),models=isLeader?1:form?.selected?.models||linked.models||countFor(node,name,cat),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
+  const keywords=keywordsFor(node),cat=categoryFor(node),classification=[cat,...keywords].join(', '),stats=getStats(node,name,classification),models=isLeader?1:form?.selected?.models||linked.models||countFor(node,name,classification),p=getPoints(node,models,stats),weapons=getWeapons(node,stats);
   // The resolved selection tree already includes mandatory per-model costs.
   // Add only genuinely additional equipment to direct/formation base costs.
   if(p.basis==='per-model'&&linked.points>0){p.points=linked.points;p.basis='selected-models';}
   else if(!p.estimated)p.points+=Math.max(0,linked.points-(pointsFrom(node)||0)-(form?.selected?.points||0));
   if(faction==='IW'&&!configs.length)configs.push({id:'default',label:'Published formation',models,points:p.points-(pointsFrom(node)||0),loadout:linked.weapons,slots:linked.slots,equipmentTree:linked.tree,equipmentPoints:linked.points});
   const id='nr-'+faction.toLowerCase()+'-'+slug(value(node,'id')||name)+'-'+hash(value(node,'id')||name).slice(0,4);
-  const vehicle=isArmouredVehicle(name,cat),daemon=/Khorne Allies|\bDAEMON\b/i.test(cat)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell|pexi 270th|tenth company scouts/i.test(name+' '+cat);
+  const vehicle=isArmouredVehicle(name,classification),daemon=/Khorne Allies|\bDAEMON\b/i.test(classification)||/^(Bloodletters|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name),mortal=/thrall|reaver|cultist|militia|mortal|directorate|servitor|civilian|operative cell|pexi 270th|tenth company scouts/i.test(name+' '+classification);
   const special=faction==='IW'&&!vehicle&&!mortal&&!daemon?{fnp:5,regen:1,painSensitive:true,...(/Lost Cohort/i.test(name)?{lost:true,mandatoryChaplain:true,painSensitive:false}:{})}:faction==='AD'?{shroud:!vehicle,nullifier:/nullifier/i.test(name)}:faction==='ST'?{psychic:!vehicle}:{};
   if(daemon)special.daemon=true;
   if(faction==='IW'&&daemon)special.alliedDaemon=/Khorne Allies/i.test(cat)||/^(Bloodletters|Bloodcrushers|Bloodthirster|Flesh Hounds|Herald of Khorne)$/i.test(name);
@@ -502,7 +514,7 @@ function parseCatalogue(xml,faction,sourceVersion=''){
    audit:{points:p.basis,unitStats:fieldCoverage?'source':'fallback',modelCount:declaredModels?'declared':'inferred',ranged:linked.weapons.some(w=>w.mode==='ranged')?'source':weapons.rangedFromSource?'source':'fallback',melee:linked.weapons.some(w=>w.mode==='melee')?'source':weapons.meleeFromSource?'source':'fallback'},
    description:`New Recruit ${cat||'datasheet'} · default squad size and wargear (playtest combat)${p.estimated?' · simulator point estimate':''}.`};
   unit.auditBlockers=[...unitAuditBlockers(node,form,profileIndex,unit.abilities),...linked.omitted];
-  unit.keywords=path(node,'categoryLinks','categoryLink').map(c=>value(c,'name'));
+  unit.keywords=keywords;
   if(/Has Deep Strike|Deep Strike without/i.test(unit.abilities.map(a=>a.description).join(' ')))unit.special.deepStrike=true;
   if(/Terminator|Jump|Raptor|Dreadclaw|Kharybdis|Deathstorm|Astartes Assault Drop Pod/i.test(name))unit.special.deepStrike=true;
   if(/aircraft|gunship|interceptor|stormbird/i.test(name+' '+cat))unit.special.aircraft=true;
