@@ -69,7 +69,7 @@ def main():
     audit={'revision':xml.get('revision'),'rootUnits':len(units),'sourceLeaders':len(characters),
            'rootUnitsWithCaps':sum(v is not None for v in caps.values()),
            'criticalLimits':expected,'firstFiveWargearQuotas':checked,'recognizedTraits':{t:sum(t.lower() in x.lower() for x in traits) for t in ('Torrent','Rapid Fire','Heavy','Twin-linked','Sustained Hits','Melta')},
-           'unmodeledRules':['nested equipment conditions','enhancements/detachment costs','leader auras','Lost Cohort control','indirect fire','Hazardous','Precision','psychic abilities']}
+           'notCertifiedByThisSourceOnlyAudit':['nested equipment conditions','enhancements/detachment costs','leader auras','Lost Cohort control','indirect fire','Hazardous','Precision','psychic abilities']}
     print('IW_ROSTER_RULE_AUDIT',json.dumps(audit,ensure_ascii=False))
     if len(units)!=74:failures['rootUnits']=f'Expected 74, got {len(units)}'
     if failures:

@@ -25,7 +25,7 @@ Source: read-only `Varroth/Gaul-Campaign-Renegades` commit `22d3ef1d06ca755118e7
 
 ## Checks and evidence
 
-The regression suite covers prior functionality plus the new army rules. CI also runs six source XML audits and four Chromium browser scripts. The catalogue execution audit checks:
+All **257 automated regression tests** pass, covering prior functionality plus the new army rules. CI also runs six source XML audits and four Chromium browser scripts. The catalogue execution audit checks:
 
 - 326 imported profiles and 652 ranged/melee execution states;
 - 284 formations and 2,991 individual reachable equipment choices, not every combination;

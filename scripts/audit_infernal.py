@@ -73,7 +73,7 @@ def main():
                 group=next((g for g in path(unit,'selectionEntryGroups','selectionEntryGroup') if re.match(r'^(\d+)\s+(?:Bloodletters|Flesh Hounds)$',g.get('name',''),re.I)),None)
                 if group is not None:models=int(re.match(r'^(\d+)',group.get('name')).group(1))
         points=price(default) if default is not None else price(unit)
-        branches=walk_selected(default or unit)
+        branches=walk_selected(default if default is not None else unit)
         linked=[profiles.get(link.get('targetId')) for x in branches for link in path(x,'infoLinks','infoLink') if link.get('type')=='profile']
         linked=[p for p in linked if p is not None]
         weapons=[p.get('name','') for p in linked]

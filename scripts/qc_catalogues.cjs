@@ -86,6 +86,18 @@ check('own daemon engines do not consume the allied daemon allowance',()=>assert
 for(const [f,name,models,points] of [['FC','Company Captain',1,90],['FC','Frostbound Line Section',10,80],['AD','Blackout Breachers',5,110],['AD','Unmarked Scout Squad',10,140],['AD','Directorate Breach Cell',5,60],['AD','Shadow Operative Cell',5,65]])check(name+' selected models and points',()=>{
  const unit=cache.catalogues[f].units.find(u=>u.name===name);assert.equal(unit.models,models);assert.equal(unit.points,points);
 });
+const iwDoc=new DOMParser().parseFromString(fs.readFileSync(path.join(source,C.FILES.IW),'utf8'),'application/xml');
+const publishedStratagems=Array.from(iwDoc.getElementsByTagName('profile')).map(p=>p.getAttribute('name').match(/^Stratagem — (.+) \((\d+) CP\)$/)).filter(Boolean).map(m=>({name:m[1],cost:Number(m[2])}));
+const implementedStratagems=[...E.STRATAGEMS,...Object.entries(E.REACTIONS).map(([name,v])=>({name,...v}))];
+check('all implemented stratagems have the source CP cost',()=>{
+ assert.equal(publishedStratagems.length,24);assert.equal(implementedStratagems.length,23);
+ for(const rule of implementedStratagems)assert.equal(publishedStratagems.find(p=>p.name===rule.name)?.cost,rule.cost,rule.name);
+ assert.deepEqual(publishedStratagems.filter(p=>!implementedStratagems.some(r=>r.name===p.name)).map(p=>p.name),['No Quarter Asked']);
+});
+report.armyRuleCoverage={detachments:Object.keys(E.DETACHMENTS),activeStratagems:E.STRATAGEMS.map(x=>x.name),automaticReactions:Object.keys(E.REACTIONS),unavailableStratagems:['No Quarter Asked'],status:'Partial: grid geometry, phase windows and scenario CP settings; not full tabletop verification'};
+check('unenhanced Alpha 0.10.2 formation keeps its saved identity',()=>{
+ if(cache.catalogues.IW.version==='e175fdcc40c5399af4e0b807a8d4f3f63ba291fe')assert.equal(C.configureUnit(byName('Infernal Legionaries')).id,'cfg-iw-cedb-da92-81b0-5a8c-9c0v-tzdemo');
+});
 report.enhancements={names:[],recipientChecks:0};
 const enhancementNames=new Set();
 for(const unit of iw)for(const enhancement of unit.enhancementOptions||[])check(unit.name+' paid '+enhancement.name,()=>{

@@ -56,3 +56,4 @@
 .deployment-select select{font-size:11px;max-width:104px;padding:4px;background:#152129;color:#dce5e6}
 
 .army-rule-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:14px 0}.army-rule-choices label{display:flex;align-items:center;gap:8px;color:var(--text)}.army-rule-choices input{width:auto}#army-rules input[type=number]{width:100%;box-sizing:border-box}#army-rules{margin-bottom:16px}#army-rules summary{cursor:pointer}
+#army-rules .reaction-choice{display:flex;align-items:flex-start;gap:8px;margin:12px 0;font-size:12px;line-height:1.5}#army-rules .reaction-choice input{width:auto;flex:0 0 auto;margin-top:3px}
